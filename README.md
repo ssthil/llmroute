@@ -1,5 +1,7 @@
 # llmroute
 
+[![CI](https://github.com/ssthil/llmroute/actions/workflows/ci.yml/badge.svg)](https://github.com/ssthil/llmroute/actions/workflows/ci.yml)
+
 A standalone, native, multi-LLM routing CLI proxy written in pure Go.
 
 `llmroute` runs a small loopback HTTP gateway that speaks the OpenAI
