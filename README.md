@@ -1,7 +1,7 @@
 # llmroute
 
 [![CI](https://github.com/ssthil/llmroute/actions/workflows/ci.yml/badge.svg)](https://github.com/ssthil/llmroute/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/ssthil/llmroute/releases/latest)
+[![Release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/ssthil/llmroute/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A standalone, native, multi-LLM routing CLI proxy written in pure Go.
