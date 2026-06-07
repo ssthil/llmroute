@@ -53,20 +53,32 @@ named `llmroute_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows).
 
 ```sh
 VERSION=0.1.0
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # linux | darwin
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')  # amd64 | arm64
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux | darwin
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # amd64 | arm64
+FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
 
-curl -sSL -o llmroute.tar.gz \
-  "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
+# download the archive (keep its original name so checksums match)
+curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/${FILE}"
 
 # (optional) verify against the published checksums
 curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/checksums.txt"
-shasum -a 256 -c checksums.txt --ignore-missing
+shasum -a 256 -c checksums.txt --ignore-missing             # prints "${FILE}: OK"
 
-tar -xzf llmroute.tar.gz llmroute
-sudo install -m 0755 llmroute /usr/local/bin/llmroute
+tar -xzf "${FILE}" llmroute
+
+# install to a user dir on your PATH (no sudo)
+mkdir -p ~/.local/bin && install -m 0755 llmroute ~/.local/bin/llmroute
 llmroute --version
+# (add to PATH if needed: echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc)
 ```
+
+> Prefer a system-wide install for all users? Use
+> `sudo install -m 0755 llmroute /usr/local/bin/llmroute` instead (it'll prompt
+> for your password).
+
+On macOS, a downloaded binary may be quarantined by Gatekeeper. If you see
+*"cannot be opened because the developer cannot be verified"*, clear the flag:
+`xattr -d com.apple.quarantine llmroute`.
 
 **Windows (PowerShell):** download `llmroute_<version>_windows_amd64.zip` from the
 [releases page](https://github.com/ssthil/llmroute/releases), extract it, and put
