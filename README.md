@@ -108,6 +108,92 @@ with the model it selects. Response headers `X-LLMRoute-Model` and
 
 ---
 
+## Usage examples
+
+### See which model intent routing picked
+
+A coding prompt is classified as `code` and sent to the cheapest code-capable
+provider with a key configured (DeepSeek first):
+
+```sh
+curl -sD - http://127.0.0.1:4040/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"fix this: ```go\nfunc main(){fmt.Println(x)}```"}]}' \
+  | grep -i '^x-llmroute'
+# x-llmroute-intent: code
+# x-llmroute-model: deepseek-chat
+```
+
+A prompt carrying an image is classified as `vision` and routed to Gemini Flash:
+
+```sh
+curl -sD - http://127.0.0.1:4040/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":[
+        {"type":"text","text":"describe this"},
+        {"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KG..."}}
+      ]}]}' \
+  | grep -i '^x-llmroute'
+# x-llmroute-intent: vision
+# x-llmroute-model: gemini-2.5-flash
+```
+
+### Drop-in with the OpenAI SDKs
+
+`llmroute` speaks the OpenAI API, so existing clients work by changing only the
+base URL — your real provider keys stay on the proxy host, not in the client.
+
+**Python:**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:4040/v1", api_key="not-needed")
+
+resp = client.chat.completions.create(
+    model="auto",  # llmroute picks the model by intent
+    messages=[{"role": "user", "content": "summarize the CAP theorem in 2 lines"}],
+)
+print(resp.choices[0].message.content)
+```
+
+**Node / TypeScript:**
+
+```ts
+import OpenAI from "openai";
+
+const client = new OpenAI({ baseURL: "http://127.0.0.1:4040/v1", apiKey: "not-needed" });
+
+const resp = await client.chat.completions.create({
+  model: "auto",
+  messages: [{ role: "user", content: "write a haiku about routers" }],
+});
+console.log(resp.choices[0].message.content);
+```
+
+### Inspect usage
+
+```sh
+$ llmroute stats
+MODEL          REQUESTS  PROMPT  COMPLETION  TOTAL
+deepseek-chat  3         412     1860        2272
+gemini-2.5-flash  1      88      230         318
+TOTAL          4         500     2090        2590
+```
+
+### Credential-leak guard in action
+
+Anything resembling a live key is rejected before it leaves the host:
+
+```sh
+$ curl -s http://127.0.0.1:4040/v1/chat/completions \
+    -H 'Content-Type: application/json' \
+    -d '{"messages":[{"role":"user","content":"my key is sk-abcdefghij1234567890ABCD"}]}'
+{"error":{"message":"request blocked: detected openai/deepseek credential signature in payload","type":"llmroute_error"}}
+```
+
+---
+
 ## Commands
 
 | Command           | Description                                                      |
