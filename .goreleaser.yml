@@ -61,3 +61,6 @@ changelog:
 release:
   draft: false
   prerelease: auto
+  # Replace artifacts on an existing release so a moved tag can be re-released
+  # cleanly instead of failing on duplicate asset uploads.
+  mode: replace
