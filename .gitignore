@@ -1,0 +1,11 @@
+# Build artifacts
+/bin/
+/dist/
+coverage.out
+
+# Local config / runtime state
+*.db
+
+# OS / editor cruft
+.DS_Store
+*.swp
