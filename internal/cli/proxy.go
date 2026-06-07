@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ssthil/llmroute/internal/config"
 	"github.com/ssthil/llmroute/internal/database"
 	"github.com/ssthil/llmroute/internal/network"
 	"github.com/ssthil/llmroute/internal/router"
@@ -43,6 +44,11 @@ Provider keys are read from the environment:
 
 			client := &http.Client{Timeout: 5 * time.Minute}
 			rtr := router.New(db, client)
+			if keys, err := config.LoadKeys(); err != nil {
+				return err
+			} else {
+				rtr.SetFileKeys(keys.Providers)
+			}
 			logger := log.New(cmd.OutOrStdout(), "", log.LstdFlags)
 			srv := network.NewServer(db, rtr, logger)
 

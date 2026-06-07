@@ -142,6 +142,61 @@ func TestDispatchFailover(t *testing.T) {
 	}
 }
 
+// TestResolveKeyEnvBeatsFile verifies the environment overrides the stored key
+// store, and the file is used only as a fallback.
+func TestResolveKeyEnvBeatsFile(t *testing.T) {
+	db := newTestDB(t)
+	rtr := New(db, http.DefaultClient)
+	rtr.SetFileKeys(map[string]string{"openai": "file-key", "deepseek": "file-deepseek"})
+
+	prov := Providers["openai"]
+
+	// Env unset -> file key used.
+	rtr.keyFn = func(string) string { return "" }
+	if got := rtr.resolveKey(prov); got != "file-key" {
+		t.Errorf("file fallback = %q, want file-key", got)
+	}
+
+	// Env set -> env wins.
+	rtr.keyFn = func(env string) string {
+		if env == "OPENAI_API_KEY" {
+			return "env-key"
+		}
+		return ""
+	}
+	if got := rtr.resolveKey(prov); got != "env-key" {
+		t.Errorf("env precedence = %q, want env-key", got)
+	}
+
+	// Neither set -> empty.
+	if got := rtr.resolveKey(Providers["anthropic"]); got != "" {
+		t.Errorf("missing key = %q, want empty", got)
+	}
+}
+
+// TestDispatchUsesFileKeys confirms a key present only in the file store lets a
+// provider be dispatched (no env var set).
+func TestDispatchUsesFileKeys(t *testing.T) {
+	db := newTestDB(t)
+	var called bool
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return newResp(http.StatusOK, `{"ok":true}`), nil
+	})}
+	rtr := New(db, client)
+	rtr.keyFn = func(string) string { return "" } // no env keys
+	rtr.SetFileKeys(map[string]string{"deepseek": "file-key"})
+
+	res, _, err := rtr.Dispatch(context.Background(), []byte(`{"messages":[{"content":"hi"}]}`))
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	defer func() { _ = res.Response.Body.Close() }()
+	if !called {
+		t.Error("expected upstream call using file key")
+	}
+}
+
 // TestDispatchSkipsMissingKeys verifies providers without an env key are
 // skipped, and that exhausting all candidates returns ErrNoUpstream.
 func TestDispatchSkipsMissingKeys(t *testing.T) {

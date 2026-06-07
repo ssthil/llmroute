@@ -104,26 +104,39 @@ Cross-platform release archives are produced with
 ## Quick start
 
 ```sh
-# 1. Initialize the 0700 config dir + 0600 SQLite db and seed the model catalog
+# 1. Interactive setup: choose which models to enable and enter each
+#    provider's API key. Creates the 0700 config dir, the 0600 records.db,
+#    and a 0600 keys.json. (Use `llmroute init --yes` to enable all models
+#    and skip key prompts — supply keys via env vars instead.)
 llmroute init
 
-# 2. Export the provider keys you have (any subset works)
-export OPENAI_API_KEY=sk-...
-export GEMINI_API_KEY=...
-export ANTHROPIC_API_KEY=sk-ant-...
-export DEEPSEEK_API_KEY=sk-...
-
-# 3. Boot the proxy (binds 127.0.0.1:4040, scans upward if busy)
+# 2. Boot the proxy (binds 127.0.0.1:4040, scans upward if busy)
 llmroute proxy
 
-# 4. Point any OpenAI-compatible client at it
+# 3. Point any OpenAI-compatible client at it
 curl http://127.0.0.1:4040/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{"model":"auto","messages":[{"role":"user","content":"write a quicksort in Go"}]}'
 
-# 5. Inspect token usage
+# 4. Inspect token usage
 llmroute stats
 ```
+
+The interactive `init` walks the catalog provider-by-provider, lets you enable
+models one at a time, and prompts (with hidden input) for each enabled
+provider's API key:
+
+```text
+DEEPSEEK
+  enable deepseek-chat (intents: chat,code, cost 0.14)? [Y/n]: y
+  enable deepseek-reasoner (intents: code, cost 0.55)? [Y/n]: n
+  deepseek API key: ********
+```
+
+Keys are written to `~/.config/llmroute/keys.json` (mode `0600`). An exported
+environment variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`,
+`DEEPSEEK_API_KEY`) always **overrides** the stored key, so you can keep secrets
+out of disk in CI by combining `init --yes` with env vars.
 
 The `model` field in your request is treated as a hint; `llmroute` overrides it
 with the model it selects. Response headers `X-LLMRoute-Model` and
@@ -221,9 +234,13 @@ $ curl -s http://127.0.0.1:4040/v1/chat/completions \
 
 | Command           | Description                                                      |
 | ----------------- | ---------------------------------------------------------------- |
-| `llmroute init`   | Create the config dir/db with strict perms and seed the catalog. |
+| `llmroute init`   | Interactive setup: create the config dir/db, choose which models to enable, and store provider keys (mode `0600`). `--yes/-y` enables all models and skips key prompts. |
 | `llmroute proxy`  | Boot the loopback routing gateway. `-p/--port` sets the preferred port (default `4040`). |
 | `llmroute stats`  | Print per-model request counts and token volumes.                |
+
+Only **enabled** models participate in routing; disabled ones stay in the
+catalog (visible in `init`'s summary) but are skipped. Re-run `llmroute init`
+any time to change selections or update keys.
 
 ---
 
@@ -239,6 +256,7 @@ $ curl -s http://127.0.0.1:4040/v1/chat/completions \
    - everything else → **chat**.
 3. **Select** — `internal/database` returns models carrying that intent tag,
    ordered cheapest-first.
+3b. Only **enabled** candidates are considered (see `llmroute init`).
 4. **Dispatch & failover** — each candidate with a configured API key is tried
    in turn; retryable upstream errors roll over to the next model.
 
@@ -254,8 +272,10 @@ $ curl -s http://127.0.0.1:4040/v1/chat/completions \
 | `gpt-4o`             | openai    | 2.50  | vision, chat, code   |
 | `claude-3-5-sonnet`  | anthropic | 3.00  | code, chat           |
 
-Provider keys are read from the environment: `OPENAI_API_KEY`,
-`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`.
+Provider keys are resolved **environment-first, then the stored key store**:
+an exported `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
+`DEEPSEEK_API_KEY` overrides whatever `llmroute init` saved in
+`~/.config/llmroute/keys.json`.
 
 ---
 
@@ -265,7 +285,8 @@ Provider keys are read from the environment: `OPENAI_API_KEY`,
 .
 ├── main.go                 # entrypoint; injects build version
 └── internal/
-    ├── cli/                # Cobra commands: init, proxy, stats
+    ├── cli/                # Cobra commands: init (wizard), proxy, stats
+    ├── config/            # 0600 keys.json store (provider API keys)
     ├── database/           # pure-Go SQLite engine, migrations, model seeds
     ├── network/            # port-scan engine + loopback reverse proxy
     ├── router/             # intent classifier + upstream hot-swap/failover
@@ -273,7 +294,9 @@ Provider keys are read from the environment: `OPENAI_API_KEY`,
 ```
 
 State lives in `~/.config/llmroute/` (honoring `XDG_CONFIG_HOME`):
-`records.db` holds the `models` and `usage_logs` tables.
+`records.db` holds the `models` (with their enabled flag) and `usage_logs`
+tables; `keys.json` (mode `0600`) holds provider API keys entered via
+`llmroute init`.
 
 ---
 
@@ -291,8 +314,12 @@ make snapshot  # local cross-platform build via goreleaser
 
 ## Configuration & security notes
 
-- The config directory (`0700`) and database file (`0600`) are created — and
-  re-asserted — so other local OS users cannot read your usage data.
+- The config directory (`0700`), database (`0600`), and `keys.json` (`0600`)
+  are created — and re-asserted — so other local OS users cannot read your
+  usage data or API keys.
+- `keys.json` stores keys in **plaintext** (locked to your user). For higher
+  assurance, skip the stored keys and export the provider env vars instead —
+  they always take precedence.
 - The proxy binds **only** to the `127.0.0.1` loopback interface.
 - The credential scanner is a guardrail, not a vault: never paste live secrets
   into prompts.

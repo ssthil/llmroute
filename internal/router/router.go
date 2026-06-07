@@ -69,8 +69,11 @@ func Classify(body string) Intent {
 type Router struct {
 	db     *database.DB
 	client *http.Client
-	// keyFn resolves a provider's API key; injectable for testing.
+	// keyFn resolves an environment variable; injectable for testing.
 	keyFn func(env string) string
+	// fileKeys holds keys persisted by interactive setup, indexed by provider
+	// name. The environment takes precedence over these.
+	fileKeys map[string]string
 }
 
 // New constructs a Router backed by db using the given HTTP client. A nil
@@ -80,6 +83,22 @@ func New(db *database.DB, client *http.Client) *Router {
 		client = http.DefaultClient
 	}
 	return &Router{db: db, client: client, keyFn: os.Getenv}
+}
+
+// SetFileKeys registers provider keys loaded from the on-disk key store. They
+// are used only when the corresponding environment variable is unset, so an
+// exported env var always wins.
+func (r *Router) SetFileKeys(keys map[string]string) {
+	r.fileKeys = keys
+}
+
+// resolveKey returns the API key for a provider: the environment variable first
+// (so an exported key overrides stored config), then the persisted key store.
+func (r *Router) resolveKey(prov Provider) string {
+	if v := r.keyFn(prov.KeyEnv); v != "" {
+		return v
+	}
+	return r.fileKeys[prov.Name]
 }
 
 // Result carries a successful upstream response back to the caller.
@@ -123,9 +142,9 @@ func (r *Router) Dispatch(ctx context.Context, body []byte) (*Result, Intent, er
 		if !ok {
 			continue
 		}
-		key := r.keyFn(prov.KeyEnv)
+		key := r.resolveKey(prov)
 		if key == "" {
-			lastErr = fmt.Errorf("provider %q: %s not set", prov.Name, prov.KeyEnv)
+			lastErr = fmt.Errorf("provider %q: no API key (set %s or run 'llmroute init')", prov.Name, prov.KeyEnv)
 			continue
 		}
 

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	// Pure-Go SQLite driver. Registers itself as "sqlite".
@@ -30,6 +31,7 @@ type Model struct {
 	Identifier     string  // upstream model id, e.g. "gpt-4o"
 	CostMultiplier float64 // relative token cost weight
 	IntentTags     string  // comma separated, e.g. "code,chat"
+	Enabled        bool    // whether the router may route to this model
 }
 
 // StatRow is an aggregated per-model usage summary.
@@ -89,7 +91,8 @@ CREATE TABLE IF NOT EXISTS models (
     provider        TEXT    NOT NULL,
     identifier      TEXT    NOT NULL UNIQUE,
     cost_multiplier REAL    NOT NULL DEFAULT 1.0,
-    intent_tags     TEXT    NOT NULL DEFAULT 'chat'
+    intent_tags     TEXT    NOT NULL DEFAULT 'chat',
+    enabled         INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS usage_logs (
@@ -103,10 +106,19 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 CREATE INDEX IF NOT EXISTS idx_usage_logs_model ON usage_logs(model);
 `
 
-// Migrate creates the models and usage_logs schemas if they do not yet exist.
+// Migrate creates the models and usage_logs schemas if they do not yet exist
+// and applies additive column migrations for databases created by earlier
+// versions.
 func (db *DB) Migrate() error {
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
+	}
+	// enabled was introduced after the initial release; add it to pre-existing
+	// model tables. SQLite reports a duplicate-column error when it already
+	// exists, which we treat as a no-op.
+	if _, err := db.Exec(`ALTER TABLE models ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("migrate models.enabled: %w", err)
 	}
 	return nil
 }
@@ -149,15 +161,15 @@ func (db *DB) Seed() error {
 	return nil
 }
 
-// ModelsByIntent returns models whose intent_tags contain the given intent,
-// ordered cheapest-first so the failover loop tries low-cost models before
-// escalating. When no model matches the intent, all models are returned so the
-// router always has a candidate to fall back on.
+// ModelsByIntent returns enabled models whose intent_tags contain the given
+// intent, ordered cheapest-first so the failover loop tries low-cost models
+// before escalating. When no enabled model matches the intent, every enabled
+// model is returned so the router always has a candidate to fall back on.
 func (db *DB) ModelsByIntent(intent string) ([]Model, error) {
 	rows, err := db.Query(`
-		SELECT id, provider, identifier, cost_multiplier, intent_tags
+		SELECT id, provider, identifier, cost_multiplier, intent_tags, enabled
 		FROM models
-		WHERE ',' || intent_tags || ',' LIKE '%,' || ? || ',%'
+		WHERE enabled = 1 AND ',' || intent_tags || ',' LIKE '%,' || ? || ',%'
 		ORDER BY cost_multiplier ASC`, intent)
 	if err != nil {
 		return nil, fmt.Errorf("query models by intent %q: %w", intent, err)
@@ -171,28 +183,57 @@ func (db *DB) ModelsByIntent(intent string) ([]Model, error) {
 	if len(models) > 0 {
 		return models, nil
 	}
-	return db.AllModels()
+	return db.EnabledModels()
 }
 
-// AllModels returns every model ordered cheapest-first.
+// AllModels returns every model (enabled or not) ordered cheapest-first. Use it
+// for display; routing should use ModelsByIntent / EnabledModels.
 func (db *DB) AllModels() ([]Model, error) {
-	rows, err := db.Query(`
-		SELECT id, provider, identifier, cost_multiplier, intent_tags
+	return db.queryModels(`
+		SELECT id, provider, identifier, cost_multiplier, intent_tags, enabled
 		FROM models ORDER BY cost_multiplier ASC`)
+}
+
+// EnabledModels returns only enabled models, ordered cheapest-first.
+func (db *DB) EnabledModels() ([]Model, error) {
+	return db.queryModels(`
+		SELECT id, provider, identifier, cost_multiplier, intent_tags, enabled
+		FROM models WHERE enabled = 1 ORDER BY cost_multiplier ASC`)
+}
+
+func (db *DB) queryModels(query string, args ...any) ([]Model, error) {
+	rows, err := db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query all models: %w", err)
+		return nil, fmt.Errorf("query models: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanModels(rows)
+}
+
+// SetModelEnabled toggles whether the router may route to a model.
+func (db *DB) SetModelEnabled(identifier string, enabled bool) error {
+	if _, err := db.Exec(`UPDATE models SET enabled = ? WHERE identifier = ?`, boolToInt(enabled), identifier); err != nil {
+		return fmt.Errorf("set enabled for %q: %w", identifier, err)
+	}
+	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func scanModels(rows *sql.Rows) ([]Model, error) {
 	var out []Model
 	for rows.Next() {
 		var m Model
-		if err := rows.Scan(&m.ID, &m.Provider, &m.Identifier, &m.CostMultiplier, &m.IntentTags); err != nil {
+		var enabled int
+		if err := rows.Scan(&m.ID, &m.Provider, &m.Identifier, &m.CostMultiplier, &m.IntentTags, &enabled); err != nil {
 			return nil, fmt.Errorf("scan model row: %w", err)
 		}
+		m.Enabled = enabled != 0
 		out = append(out, m)
 	}
 	return out, rows.Err()

@@ -73,6 +73,64 @@ func TestModelsByIntentUnknownFallsBackToAll(t *testing.T) {
 	}
 }
 
+func TestSetModelEnabledFiltersRouting(t *testing.T) {
+	db := openTestDB(t)
+
+	// All seeded models are enabled by default.
+	all, _ := db.AllModels()
+	enabled, _ := db.EnabledModels()
+	if len(enabled) != len(all) {
+		t.Fatalf("expected all %d models enabled, got %d", len(all), len(enabled))
+	}
+
+	// Disable the cheapest code model and confirm it drops out of routing.
+	code, _ := db.ModelsByIntent("code")
+	first := code[0].Identifier
+	if err := db.SetModelEnabled(first, false); err != nil {
+		t.Fatalf("SetModelEnabled: %v", err)
+	}
+
+	code2, _ := db.ModelsByIntent("code")
+	for _, m := range code2 {
+		if m.Identifier == first {
+			t.Errorf("%q should be excluded after disabling", first)
+		}
+	}
+	// AllModels still lists it, now disabled.
+	for _, m := range mustAll(t, db) {
+		if m.Identifier == first && m.Enabled {
+			t.Errorf("%q should be marked disabled in AllModels", first)
+		}
+	}
+}
+
+func TestModelsByIntentFallbackRespectsEnabled(t *testing.T) {
+	db := openTestDB(t)
+	// Disable every model, then an unknown intent should fall back to the
+	// enabled set — which is now empty.
+	for _, m := range mustAll(t, db) {
+		if err := db.SetModelEnabled(m.Identifier, false); err != nil {
+			t.Fatalf("disable %s: %v", m.Identifier, err)
+		}
+	}
+	got, err := db.ModelsByIntent("anything")
+	if err != nil {
+		t.Fatalf("ModelsByIntent: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no routable models, got %d", len(got))
+	}
+}
+
+func mustAll(t *testing.T, db *DB) []Model {
+	t.Helper()
+	all, err := db.AllModels()
+	if err != nil {
+		t.Fatalf("AllModels: %v", err)
+	}
+	return all
+}
+
 func TestLogUsageAndStats(t *testing.T) {
 	db := openTestDB(t)
 
