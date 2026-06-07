@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -44,6 +45,9 @@ func TestScanForKeys(t *testing.T) {
 }
 
 func TestEnsureConfigDirPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not enforced on Windows")
+	}
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmp)
 
@@ -65,6 +69,9 @@ func TestEnsureConfigDirPermissions(t *testing.T) {
 }
 
 func TestOpenSecureFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not enforced on Windows")
+	}
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "secret.db")
 
