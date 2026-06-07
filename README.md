@@ -32,11 +32,44 @@ No Node. No Python. No CGO. A single static binary and a 0600 SQLite file.
 
 ## Install
 
-```sh
-# from source
-go install github.com/ssthil/llmroute@latest
+### Download a release binary
 
-# or build locally
+Pre-built, CGO-free binaries are attached to every
+[GitHub release](https://github.com/ssthil/llmroute/releases). Archives are
+named `llmroute_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows).
+
+**Linux / macOS:**
+
+```sh
+VERSION=0.1.0
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # linux | darwin
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')  # amd64 | arm64
+
+curl -sSL -o llmroute.tar.gz \
+  "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
+
+# (optional) verify against the published checksums
+curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/checksums.txt"
+shasum -a 256 -c checksums.txt --ignore-missing
+
+tar -xzf llmroute.tar.gz llmroute
+sudo install -m 0755 llmroute /usr/local/bin/llmroute
+llmroute --version
+```
+
+**Windows (PowerShell):** download `llmroute_<version>_windows_amd64.zip` from the
+[releases page](https://github.com/ssthil/llmroute/releases), extract it, and put
+`llmroute.exe` somewhere on your `PATH`.
+
+### Install with Go
+
+```sh
+go install github.com/ssthil/llmroute@latest   # latest tagged release
+```
+
+### Build from source
+
+```sh
 make build      # produces ./bin/llmroute
 ```
 
