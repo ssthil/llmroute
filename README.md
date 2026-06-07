@@ -14,6 +14,13 @@ when a provider is rate-limited or down.
 
 No Node. No Python. No CGO. A single static binary and a 0600 SQLite file.
 
+`llmroute` is provider-agnostic: it accepts the OpenAI chat-completions request
+format and forwards it to each provider's OpenAI-compatible endpoint. OpenAI,
+Gemini (via Google's OpenAI-compat surface), and DeepSeek expose this natively.
+Anthropic's native Messages API is not OpenAI-shaped at `/v1/chat/completions`,
+so routing to it assumes an OpenAI-compatible gateway in front; a native
+Anthropic adapter is not yet implemented.
+
 ---
 
 ## Features
