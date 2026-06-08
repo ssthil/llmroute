@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.4.1] - 2026-06-08
 
+### Added
+- The boxed banner (wordmark · version · tagline) now also headers the bare
+  `llmroute` status view, not just the first-run welcome.
+
 ### Fixed
 - `models add` (and the `init` local-model / custom-provider steps) is now
   idempotent: re-adding an existing model updates and **re-enables** it instead

@@ -51,15 +51,21 @@ All state lives in a 0600 SQLite database under ~/.config/llmroute.`,
 	return root
 }
 
-// printWelcome renders the first-run intro: a banner, getting-started steps,
-// and quick tips.
-func printWelcome(out io.Writer) {
+// printBanner renders the boxed wordmark (title · version · tagline). Shown on
+// the first-run welcome and atop the bare-command status view.
+func printBanner(out io.Writer) {
 	const w = 50
 	fmt.Fprintln(out)
 	boxTop(out, w)
 	boxRow(out, w, "  llmroute "+version, func(s string) string { return bold(cyan(s)) })
 	boxRow(out, w, "  one endpoint · many providers · auto-routed", dim)
 	boxBottom(out, w)
+}
+
+// printWelcome renders the first-run intro: the banner, getting-started steps,
+// and quick tips.
+func printWelcome(out io.Writer) {
+	printBanner(out)
 	fmt.Fprintln(out)
 
 	fmt.Fprintln(out, bold("Get started"))
@@ -106,8 +112,9 @@ func showStatus(out io.Writer) error {
 			enabled++
 		}
 	}
-	header(out, "models")
-	fmt.Fprintln(out, dim(fmt.Sprintf("%d of %d enabled", enabled, len(models))))
+	printBanner(out)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, dim(fmt.Sprintf("%d of %d models enabled", enabled, len(models))))
 	renderModelTable(out, models)
 	fmt.Fprintln(out)
 	note(out, "configure: %s · keys: %s · run: %s",
