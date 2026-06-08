@@ -51,6 +51,31 @@ All state lives in a 0600 SQLite database under ~/.config/llmroute.`,
 	return root
 }
 
+// printWelcome renders the first-run intro: a banner, getting-started steps,
+// and quick tips.
+func printWelcome(out io.Writer) {
+	const w = 50
+	fmt.Fprintln(out)
+	boxTop(out, w)
+	boxRow(out, w, "  llmroute "+version, func(s string) string { return bold(cyan(s)) })
+	boxRow(out, w, "  one endpoint · many providers · auto-routed", dim)
+	boxBottom(out, w)
+	fmt.Fprintln(out)
+
+	fmt.Fprintln(out, bold("Get started"))
+	step(out, 1, "llmroute init", "choose models & add provider keys")
+	step(out, 2, "llmroute proxy", "start the gateway on 127.0.0.1:4040")
+	step(out, 3, "point your client", "at http://127.0.0.1:4040/v1")
+	fmt.Fprintln(out)
+
+	fmt.Fprintln(out, bold("Tips"))
+	tip(out, "llmroute", "show your models & their status")
+	tip(out, "llmroute models add", "add a local model (Ollama) or another provider")
+	tip(out, "llmroute keys set <p>", "update one provider's key")
+	tip(out, "llmroute --help", "all commands · set NO_COLOR=1 to disable color")
+	fmt.Fprintln(out)
+}
+
 // showStatus prints the model catalog with status, or a getting-started hint if
 // the database hasn't been created yet (so bare `llmroute` never silently
 // provisions state).
@@ -61,9 +86,7 @@ func showStatus(out io.Writer) error {
 	}
 	path := filepath.Join(dir, database.DBFileName)
 	if _, err := os.Stat(path); err != nil {
-		header(out, "welcome")
-		info(out, "not set up yet — run %s to choose models and add keys", bold("llmroute init"))
-		note(out, "or %s for all commands", bold("llmroute --help"))
+		printWelcome(out)
 		return nil
 	}
 

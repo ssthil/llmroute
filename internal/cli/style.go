@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -86,4 +87,42 @@ func warn(w io.Writer, format string, a ...any) {
 
 func note(w io.Writer, format string, a ...any) {
 	fmt.Fprintln(w, gray("  "+fmt.Sprintf(format, a...)))
+}
+
+// runeLen counts visible runes (used for box padding so ANSI never inflates it).
+func runeLen(s string) int { return utf8.RuneCountInString(s) }
+
+// boxTop/boxBottom/boxRow draw a rounded single-line box of the given inner
+// width. Row content is padded on the plain string, then colorized as a whole
+// so trailing pad stays invisible and aligned.
+func boxTop(w io.Writer, width int) {
+	fmt.Fprintln(w, gray("╭"+strings.Repeat("─", width)+"╮"))
+}
+
+func boxBottom(w io.Writer, width int) {
+	fmt.Fprintln(w, gray("╰"+strings.Repeat("─", width)+"╯"))
+}
+
+func boxRow(w io.Writer, width int, plain string, color func(string) string) {
+	pad := width - runeLen(plain)
+	if pad < 0 {
+		pad = 0
+	}
+	s := plain + strings.Repeat(" ", pad)
+	if color != nil {
+		s = color(s)
+	}
+	fmt.Fprintf(w, "%s%s%s\n", gray("│"), s, gray("│"))
+}
+
+// step prints a numbered getting-started line with an aligned command column.
+func step(w io.Writer, n int, cmd, desc string) {
+	fmt.Fprintf(w, "  %s %s %s\n",
+		cyan(fmt.Sprintf("%d.", n)), bold(fmt.Sprintf("%-22s", cmd)), gray(desc))
+}
+
+// tip prints a bullet tip line with an aligned command column.
+func tip(w io.Writer, cmd, desc string) {
+	fmt.Fprintf(w, "  %s %s %s\n",
+		gray(glyphDot), bold(fmt.Sprintf("%-22s", cmd)), gray(desc))
 }

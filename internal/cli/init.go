@@ -56,7 +56,11 @@ prompted (supply them via environment variables).`,
 
 			interactive := !nonInteractive && isTerminal(cmd.InOrStdin())
 			if !interactive {
-				return printCatalog(out, db, "non-interactive setup — all models enabled (keys from env vars)")
+				if err := printCatalog(out, db, "non-interactive setup — all models enabled (keys from env vars)"); err != nil {
+					return err
+				}
+				printNextSteps(out)
+				return nil
 			}
 
 			keys, err := config.LoadKeys()
@@ -72,7 +76,11 @@ prompted (supply them via environment variables).`,
 				return err
 			}
 			fmt.Fprintln(out)
-			return printCatalog(out, db, "setup complete")
+			if err := printCatalog(out, db, "setup complete"); err != nil {
+				return err
+			}
+			printNextSteps(out)
+			return nil
 		},
 	}
 
@@ -387,6 +395,16 @@ func askYesNo(p *promptIO, question string, def bool) (bool, error) {
 		// Treat anything unexpected as the default to keep the flow moving.
 		return def, nil
 	}
+}
+
+// printNextSteps prints a short, friendly footer after setup completes.
+func printNextSteps(out io.Writer) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, bold("Next"))
+	step(out, 1, "llmroute proxy", "start the gateway (127.0.0.1:4040)")
+	step(out, 2, "point your client", "at http://127.0.0.1:4040/v1")
+	note(out, "review anytime with %s · add models with %s",
+		bold("llmroute"), bold("llmroute models add"))
 }
 
 // printCatalog prints the current model catalog with enabled state.

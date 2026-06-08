@@ -14,8 +14,9 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Multi-select `init`** — the wizard now shows the full numbered catalog and
   takes one selection (`all` / `none` / `1,3,5` / Enter to keep) instead of a
   prompt per model, then asks for the key of each enabled provider.
-- **Bare `llmroute`** prints the model catalog with status (or a getting-started
-  hint if not yet set up) instead of generic help.
+- **Bare `llmroute`** prints the model catalog with status, or — on first run —
+  a modern welcome screen (boxed banner, getting-started steps, and tips).
+- **Post-setup "Next" footer** after `init` pointing to `proxy` and the endpoint.
 
 ### Fixed
 - Model table alignment: width padding is applied to plain text before
