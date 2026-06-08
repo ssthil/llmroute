@@ -131,6 +131,69 @@ func mustAll(t *testing.T, db *DB) []Model {
 	return all
 }
 
+func TestProvidersSeededAndCRUD(t *testing.T) {
+	db := openTestDB(t)
+
+	provs, err := db.AllProviders()
+	if err != nil {
+		t.Fatalf("AllProviders: %v", err)
+	}
+	if len(provs) != len(seedProviders) {
+		t.Fatalf("seeded %d providers, want %d", len(provs), len(seedProviders))
+	}
+	if _, err := db.Provider("openai"); err != nil {
+		t.Errorf("openai provider missing: %v", err)
+	}
+	if _, err := db.Provider("does-not-exist"); err == nil {
+		t.Error("expected error for unknown provider")
+	}
+
+	// Add a local provider.
+	local := Provider{Name: "ollama", BaseURL: "http://localhost:11434/v1/chat/completions", NeedsKey: false}
+	if err := db.UpsertProvider(local); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	got, err := db.Provider("ollama")
+	if err != nil {
+		t.Fatalf("Provider(ollama): %v", err)
+	}
+	if got.NeedsKey || got.BaseURL != local.BaseURL {
+		t.Errorf("ollama provider = %+v", got)
+	}
+}
+
+func TestAddRemoveModel(t *testing.T) {
+	db := openTestDB(t)
+
+	// Adding a model for an unknown provider fails.
+	if err := db.AddModel(Model{Provider: "ghost", Identifier: "x"}); err == nil {
+		t.Error("expected error adding model with unknown provider")
+	}
+
+	_ = db.UpsertProvider(Provider{Name: "ollama", BaseURL: "http://localhost:11434/v1/chat/completions", NeedsKey: false})
+	if err := db.AddModel(Model{Provider: "ollama", Identifier: "gemma3:27b", IntentTags: "chat,code"}); err != nil {
+		t.Fatalf("AddModel: %v", err)
+	}
+
+	enabled, _ := db.ModelsByIntent("code")
+	found := false
+	for _, m := range enabled {
+		if m.Identifier == "gemma3:27b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("gemma3:27b not routable for code after add")
+	}
+
+	if err := db.RemoveModel("gemma3:27b"); err != nil {
+		t.Fatalf("RemoveModel: %v", err)
+	}
+	if err := db.RemoveModel("gemma3:27b"); err == nil {
+		t.Error("expected error removing missing model")
+	}
+}
+
 func TestLogUsageAndStats(t *testing.T) {
 	db := openTestDB(t)
 

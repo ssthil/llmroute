@@ -149,11 +149,12 @@ func TestResolveKeyEnvBeatsFile(t *testing.T) {
 	rtr := New(db, http.DefaultClient)
 	rtr.SetFileKeys(map[string]string{"openai": "file-key", "deepseek": "file-deepseek"})
 
-	prov := Providers["openai"]
+	openai := database.Provider{Name: "openai", KeyEnv: "OPENAI_API_KEY", NeedsKey: true}
+	anthropic := database.Provider{Name: "anthropic", KeyEnv: "ANTHROPIC_API_KEY", NeedsKey: true}
 
 	// Env unset -> file key used.
 	rtr.keyFn = func(string) string { return "" }
-	if got := rtr.resolveKey(prov); got != "file-key" {
+	if got := rtr.resolveKey(openai); got != "file-key" {
 		t.Errorf("file fallback = %q, want file-key", got)
 	}
 
@@ -164,12 +165,12 @@ func TestResolveKeyEnvBeatsFile(t *testing.T) {
 		}
 		return ""
 	}
-	if got := rtr.resolveKey(prov); got != "env-key" {
+	if got := rtr.resolveKey(openai); got != "env-key" {
 		t.Errorf("env precedence = %q, want env-key", got)
 	}
 
 	// Neither set -> empty.
-	if got := rtr.resolveKey(Providers["anthropic"]); got != "" {
+	if got := rtr.resolveKey(anthropic); got != "" {
 		t.Errorf("missing key = %q, want empty", got)
 	}
 }
@@ -194,6 +195,45 @@ func TestDispatchUsesFileKeys(t *testing.T) {
 	defer func() { _ = res.Response.Body.Close() }()
 	if !called {
 		t.Error("expected upstream call using file key")
+	}
+}
+
+// TestDispatchLocalProviderNoKey verifies a no-key (local) provider is
+// dispatched without an Authorization header and with no key configured.
+func TestDispatchLocalProviderNoKey(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.UpsertProvider(database.Provider{
+		Name: "ollama", BaseURL: "http://localhost:11434/v1/chat/completions", NeedsKey: false,
+	}); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	// Cheap local model so it's the first code candidate.
+	if err := db.AddModel(database.Model{
+		Provider: "ollama", Identifier: "gemma3:27b", CostMultiplier: 0.0, IntentTags: "chat,code",
+	}); err != nil {
+		t.Fatalf("AddModel: %v", err)
+	}
+
+	var sawAuth bool
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "" {
+			sawAuth = true
+		}
+		return newResp(http.StatusOK, `{"ok":true}`), nil
+	})}
+	rtr := New(db, client)
+	rtr.keyFn = func(string) string { return "" } // no keys anywhere
+
+	res, _, err := rtr.Dispatch(context.Background(), []byte("```go\nfunc main(){}\n```"))
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	defer func() { _ = res.Response.Body.Close() }()
+	if res.Provider != "ollama" {
+		t.Errorf("provider = %q, want ollama", res.Provider)
+	}
+	if sawAuth {
+		t.Error("local provider must be called without an Authorization header")
 	}
 }
 

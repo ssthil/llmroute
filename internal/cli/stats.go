@@ -32,13 +32,14 @@ func newStatsCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
+			header(out, "usage")
 			if len(rows) == 0 {
-				fmt.Fprintln(out, "no usage recorded yet")
+				note(out, "no usage recorded yet")
 				return nil
 			}
 
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "MODEL\tREQUESTS\tPROMPT\tCOMPLETION\tTOTAL")
+			fmt.Fprintln(tw, dim("MODEL\tREQUESTS\tPROMPT\tCOMPLETION\tTOTAL"))
 			var totReq, totPrompt, totCompletion int64
 			for _, r := range rows {
 				total := r.PromptTokens + r.CompletionTokens
@@ -48,8 +49,9 @@ func newStatsCmd() *cobra.Command {
 				totPrompt += r.PromptTokens
 				totCompletion += r.CompletionTokens
 			}
-			fmt.Fprintf(tw, "TOTAL\t%d\t%d\t%d\t%d\n",
-				totReq, totPrompt, totCompletion, totPrompt+totCompletion)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+				bold("TOTAL"), bold(fmt.Sprint(totReq)), bold(fmt.Sprint(totPrompt)),
+				bold(fmt.Sprint(totCompletion)), bold(fmt.Sprint(totPrompt+totCompletion)))
 			return tw.Flush()
 		},
 	}

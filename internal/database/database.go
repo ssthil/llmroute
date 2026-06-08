@@ -34,6 +34,16 @@ type Model struct {
 	Enabled        bool    // whether the router may route to this model
 }
 
+// Provider describes how to reach an upstream OpenAI-compatible endpoint. It is
+// stored in the providers table so users can register custom/local providers
+// (e.g. Ollama) without a new build.
+type Provider struct {
+	Name     string // matches Model.Provider, e.g. "openai", "ollama"
+	BaseURL  string // full chat-completions URL
+	KeyEnv   string // env var holding the bearer token ("" when none)
+	NeedsKey bool   // false for local providers like Ollama
+}
+
 // StatRow is an aggregated per-model usage summary.
 type StatRow struct {
 	Model            string
@@ -104,6 +114,13 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_logs_model ON usage_logs(model);
+
+CREATE TABLE IF NOT EXISTS providers (
+    name      TEXT PRIMARY KEY,
+    base_url  TEXT    NOT NULL,
+    key_env   TEXT    NOT NULL DEFAULT '',
+    needs_key INTEGER NOT NULL DEFAULT 1
+);
 `
 
 // Migrate creates the models and usage_logs schemas if they do not yet exist
@@ -121,6 +138,15 @@ func (db *DB) Migrate() error {
 		return fmt.Errorf("migrate models.enabled: %w", err)
 	}
 	return nil
+}
+
+// seedProviders are the built-in cloud providers inserted on first boot. Users
+// can add more (e.g. local Ollama) via the models command.
+var seedProviders = []Provider{
+	{Name: "openai", BaseURL: "https://api.openai.com/v1/chat/completions", KeyEnv: "OPENAI_API_KEY", NeedsKey: true},
+	{Name: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", KeyEnv: "GEMINI_API_KEY", NeedsKey: true},
+	{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1/chat/completions", KeyEnv: "ANTHROPIC_API_KEY", NeedsKey: true},
+	{Name: "deepseek", BaseURL: "https://api.deepseek.com/v1/chat/completions", KeyEnv: "DEEPSEEK_API_KEY", NeedsKey: true},
 }
 
 // seedModels is the baseline routing matrix inserted on first boot.
@@ -142,6 +168,18 @@ func (db *DB) Seed() error {
 		return fmt.Errorf("begin seed tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	provStmt, err := tx.Prepare(`INSERT OR IGNORE INTO providers
+		(name, base_url, key_env, needs_key) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare provider seed: %w", err)
+	}
+	defer func() { _ = provStmt.Close() }()
+	for _, p := range seedProviders {
+		if _, err := provStmt.Exec(p.Name, p.BaseURL, p.KeyEnv, boolToInt(p.NeedsKey)); err != nil {
+			return fmt.Errorf("seed provider %q: %w", p.Name, err)
+		}
+	}
 
 	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO models
 		(provider, identifier, cost_multiplier, intent_tags) VALUES (?, ?, ?, ?)`)
@@ -212,8 +250,107 @@ func (db *DB) queryModels(query string, args ...any) ([]Model, error) {
 
 // SetModelEnabled toggles whether the router may route to a model.
 func (db *DB) SetModelEnabled(identifier string, enabled bool) error {
-	if _, err := db.Exec(`UPDATE models SET enabled = ? WHERE identifier = ?`, boolToInt(enabled), identifier); err != nil {
+	res, err := db.Exec(`UPDATE models SET enabled = ? WHERE identifier = ?`, boolToInt(enabled), identifier)
+	if err != nil {
 		return fmt.Errorf("set enabled for %q: %w", identifier, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("model %q not found", identifier)
+	}
+	return nil
+}
+
+// AddModel inserts a new model. The referenced provider must already exist.
+func (db *DB) AddModel(m Model) error {
+	if _, err := db.Provider(m.Provider); err != nil {
+		return fmt.Errorf("add model %q: %w", m.Identifier, err)
+	}
+	tags := m.IntentTags
+	if tags == "" {
+		tags = "chat"
+	}
+	cost := m.CostMultiplier
+	if cost <= 0 {
+		cost = 1.0
+	}
+	_, err := db.Exec(`INSERT INTO models (provider, identifier, cost_multiplier, intent_tags, enabled)
+		VALUES (?, ?, ?, ?, ?)`, m.Provider, m.Identifier, cost, tags, boolToInt(true))
+	if err != nil {
+		return fmt.Errorf("add model %q: %w", m.Identifier, err)
+	}
+	return nil
+}
+
+// RemoveModel deletes a model by identifier.
+func (db *DB) RemoveModel(identifier string) error {
+	res, err := db.Exec(`DELETE FROM models WHERE identifier = ?`, identifier)
+	if err != nil {
+		return fmt.Errorf("remove model %q: %w", identifier, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("model %q not found", identifier)
+	}
+	return nil
+}
+
+// Provider returns a single provider by name.
+func (db *DB) Provider(name string) (Provider, error) {
+	var p Provider
+	var needs int
+	err := db.QueryRow(`SELECT name, base_url, key_env, needs_key FROM providers WHERE name = ?`, name).
+		Scan(&p.Name, &p.BaseURL, &p.KeyEnv, &needs)
+	if err == sql.ErrNoRows {
+		return Provider{}, fmt.Errorf("provider %q not found", name)
+	}
+	if err != nil {
+		return Provider{}, fmt.Errorf("query provider %q: %w", name, err)
+	}
+	p.NeedsKey = needs != 0
+	return p, nil
+}
+
+// AllProviders returns every provider ordered by name.
+func (db *DB) AllProviders() ([]Provider, error) {
+	rows, err := db.Query(`SELECT name, base_url, key_env, needs_key FROM providers ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query providers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Provider
+	for rows.Next() {
+		var p Provider
+		var needs int
+		if err := rows.Scan(&p.Name, &p.BaseURL, &p.KeyEnv, &needs); err != nil {
+			return nil, fmt.Errorf("scan provider row: %w", err)
+		}
+		p.NeedsKey = needs != 0
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ProvidersMap returns all providers keyed by name for quick lookup.
+func (db *DB) ProvidersMap() (map[string]Provider, error) {
+	all, err := db.AllProviders()
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]Provider, len(all))
+	for _, p := range all {
+		m[p.Name] = p
+	}
+	return m, nil
+}
+
+// UpsertProvider inserts or updates a provider by name.
+func (db *DB) UpsertProvider(p Provider) error {
+	_, err := db.Exec(`
+		INSERT INTO providers (name, base_url, key_env, needs_key) VALUES (?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET base_url=excluded.base_url, key_env=excluded.key_env, needs_key=excluded.needs_key`,
+		p.Name, p.BaseURL, p.KeyEnv, boolToInt(p.NeedsKey))
+	if err != nil {
+		return fmt.Errorf("upsert provider %q: %w", p.Name, err)
 	}
 	return nil
 }

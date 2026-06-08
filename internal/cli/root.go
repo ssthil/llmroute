@@ -36,6 +36,8 @@ All state lives in a 0600 SQLite database under ~/.config/llmroute.`,
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newProxyCmd())
 	root.AddCommand(newStatsCmd())
+	root.AddCommand(newKeysCmd())
+	root.AddCommand(newModelsCmd())
 	return root
 }
 

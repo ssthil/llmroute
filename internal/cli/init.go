@@ -6,14 +6,13 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/ssthil/llmroute/internal/config"
 	"github.com/ssthil/llmroute/internal/database"
-	"github.com/ssthil/llmroute/internal/router"
 	"github.com/ssthil/llmroute/internal/security"
 )
 
@@ -51,12 +50,14 @@ prompted (supply them via environment variables).`,
 			defer func() { _ = db.Close() }()
 
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "config dir : %s (0700)\n", dir)
-			fmt.Fprintf(out, "database   : %s (0600)\n\n", path)
+			header(out, "setup")
+			field(out, "config", dim(dir)+"  "+gray("(0700)"))
+			field(out, "database", dim(path)+"  "+gray("(0600)"))
+			fmt.Fprintln(out)
 
 			interactive := !nonInteractive && isTerminal(cmd.InOrStdin())
 			if !interactive {
-				return printCatalog(out, db, "non-interactive setup: all models enabled (keys from env vars)")
+				return printCatalog(out, db, "non-interactive setup — all models enabled (keys from env vars)")
 			}
 
 			keys, err := config.LoadKeys()
@@ -64,16 +65,14 @@ prompted (supply them via environment variables).`,
 				return err
 			}
 			pio := &promptIO{
-				in:  bufio.NewReader(cmd.InOrStdin()),
-				out: out,
-				secret: func() (string, error) {
-					b, err := term.ReadPassword(int(os.Stdin.Fd()))
-					return string(b), err
-				},
+				in:     bufio.NewReader(cmd.InOrStdin()),
+				out:    out,
+				secret: readSecret,
 			}
 			if err := runWizard(db, keys, pio); err != nil {
 				return err
 			}
+			fmt.Fprintln(out)
 			return printCatalog(out, db, "setup complete")
 		},
 	}
@@ -98,18 +97,27 @@ func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 	if err != nil {
 		return err
 	}
+	providers, err := db.ProvidersMap()
+	if err != nil {
+		return err
+	}
 	groups := groupByProvider(models)
 
-	fmt.Fprintln(p.out, "Choose which models to enable, then add each provider's API key.")
-	fmt.Fprintln(p.out, "(press Enter to accept the [default]; keys are hidden as you type)")
+	fmt.Fprintln(p.out, dim("Choose which models to enable, then add each provider's API key."))
+	fmt.Fprintln(p.out, dim("Press Enter to accept the [default]; keys are hidden as you type."))
 	fmt.Fprintln(p.out)
 
 	for _, g := range groups {
-		fmt.Fprintf(p.out, "%s\n", strings.ToUpper(g.provider))
+		local := ""
+		if prov := providers[g.provider]; !prov.NeedsKey {
+			local = gray(" (local)")
+		}
+		fmt.Fprintf(p.out, "%s %s%s\n", cyan(glyphDot), bold(g.provider), local)
 		anyEnabled := false
 		for _, m := range g.models {
-			enable, err := askYesNo(p, fmt.Sprintf("  enable %s (intents: %s, cost %.2f)?",
-				m.Identifier, m.IntentTags, m.CostMultiplier), m.Enabled)
+			label := fmt.Sprintf("  enable %s %s", m.Identifier,
+				gray(fmt.Sprintf("(%s · cost %.2f)", m.IntentTags, m.CostMultiplier)))
+			enable, err := askYesNo(p, label, m.Enabled)
 			if err != nil {
 				return err
 			}
@@ -122,27 +130,161 @@ func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 		}
 
 		if !anyEnabled {
-			fmt.Fprintf(p.out, "  (no %s models enabled — skipping key)\n\n", g.provider)
+			note(p.out, "no %s models enabled — skipping key", g.provider)
+			fmt.Fprintln(p.out)
 			continue
 		}
 
-		if err := promptProviderKey(p, keys, g.provider); err != nil {
+		prov := providers[g.provider]
+		if !prov.NeedsKey {
+			note(p.out, "%s is local/no-key — nothing to enter", g.provider)
+			fmt.Fprintln(p.out)
+			continue
+		}
+		if err := promptProviderKey(p, keys, prov); err != nil {
 			return err
 		}
 		fmt.Fprintln(p.out)
+	}
+
+	if err := addCustomProviders(db, keys, p); err != nil {
+		return err
 	}
 
 	if err := keys.Save(); err != nil {
 		return err
 	}
 	path, _ := config.KeysPath()
-	fmt.Fprintf(p.out, "saved provider keys to %s (0600)\n\n", path)
+	success(p.out, "saved provider keys to %s %s", path, gray("(0600)"))
 	return nil
 }
 
+// addCustomProviders lets the user register their own OpenAI-compatible
+// providers (Groq, Cerebras, a local Ollama, …) interactively. It loops until
+// the user declines to add another.
+func addCustomProviders(db *database.DB, keys *config.Keys, p *promptIO) error {
+	for {
+		fmt.Fprintln(p.out)
+		add, err := askYesNo(p, fmt.Sprintf("%s add a custom provider %s",
+			cyan(glyphDot), gray("(Groq, Cerebras, local Ollama, …)")), false)
+		if err != nil {
+			return err
+		}
+		if !add {
+			return nil
+		}
+
+		name, err := askLine(p, "provider name", "")
+		if err != nil {
+			return err
+		}
+		name = strings.ToLower(name)
+		if name == "" {
+			warn(p.out, "skipped — no provider name given")
+			continue
+		}
+
+		baseURL, err := askLine(p, "base URL (…/v1/chat/completions)", "")
+		if err != nil {
+			return err
+		}
+		if baseURL == "" {
+			warn(p.out, "skipped — no base URL given")
+			continue
+		}
+
+		needsKey, err := askYesNo(p, "  requires an API key", true)
+		if err != nil {
+			return err
+		}
+		keyEnv := ""
+		if needsKey {
+			keyEnv, err = askLine(p, "key env var", strings.ToUpper(name)+"_API_KEY")
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := db.UpsertProvider(database.Provider{
+			Name: name, BaseURL: baseURL, KeyEnv: keyEnv, NeedsKey: needsKey,
+		}); err != nil {
+			return err
+		}
+		success(p.out, "added provider %s %s", name, gray(baseURL))
+
+		id, err := askLine(p, "model id", "")
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			warn(p.out, "provider saved, but no model added (use 'llmroute models add' later)")
+			continue
+		}
+		intents, err := askLine(p, "intents (comma: chat,code,vision)", "chat")
+		if err != nil {
+			return err
+		}
+		cost := parseCost(mustLine(p, "cost multiplier", "1.0"))
+
+		if err := db.AddModel(database.Model{
+			Provider: name, Identifier: id, IntentTags: intents, CostMultiplier: cost,
+		}); err != nil {
+			warn(p.out, "could not add model: %v", err)
+			continue
+		}
+		success(p.out, "added model %s", id)
+
+		if needsKey {
+			if err := promptProviderKey(p, keys, database.Provider{Name: name, KeyEnv: keyEnv, NeedsKey: true}); err != nil {
+				return err
+			}
+		} else {
+			note(p.out, "local/no-key provider — no key needed")
+		}
+	}
+}
+
+// askLine prompts for a single line of input, returning def on an empty reply.
+func askLine(p *promptIO, prompt, def string) (string, error) {
+	hint := ""
+	if def != "" {
+		hint = dim(" [" + def + "]")
+	}
+	fmt.Fprintf(p.out, "  %s %s%s: ", cyan(glyphArrow), prompt, hint)
+	line, err := p.in.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return def, nil
+	}
+	return line, nil
+}
+
+func mustLine(p *promptIO, prompt, def string) string {
+	v, err := askLine(p, prompt, def)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+func parseCost(s string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || v <= 0 {
+		return 1.0
+	}
+	return v
+}
+
 // promptProviderKey asks for (or keeps) a provider's API key.
-func promptProviderKey(p *promptIO, keys *config.Keys, provider string) error {
-	env := providerKeyEnv(provider)
+func promptProviderKey(p *promptIO, keys *config.Keys, prov database.Provider) error {
+	provider := prov.Name
+	env := prov.KeyEnv
+	if env == "" {
+		env = strings.ToUpper(provider) + "_API_KEY"
+	}
 	existing := keys.Get(provider)
 
 	hint := ""
@@ -152,7 +294,7 @@ func promptProviderKey(p *promptIO, keys *config.Keys, provider string) error {
 		hint = fmt.Sprintf(" [%s is set in env; Enter to skip]", env)
 	}
 
-	fmt.Fprintf(p.out, "  %s API key%s: ", provider, hint)
+	fmt.Fprintf(p.out, "  %s %s%s: ", cyan(glyphArrow), provider+" API key", dim(hint))
 	val, err := p.secret()
 	if err != nil {
 		return fmt.Errorf("read %s key: %w", provider, err)
@@ -163,20 +305,20 @@ func promptProviderKey(p *promptIO, keys *config.Keys, provider string) error {
 	switch {
 	case val != "":
 		keys.Set(provider, val)
-		fmt.Fprintf(p.out, "  stored %s key\n", provider)
+		success(p.out, "stored %s key %s", provider, gray(maskKey(val)))
 	case existing != "":
-		fmt.Fprintf(p.out, "  kept existing %s key\n", provider)
+		success(p.out, "kept existing %s key %s", provider, gray(maskKey(existing)))
 	default:
-		fmt.Fprintf(p.out, "  no %s key stored (set %s to use it)\n", provider, env)
+		warn(p.out, "no %s key stored (set %s to use it)", provider, env)
 	}
 	return nil
 }
 
 // askYesNo reads a y/n answer, returning def on an empty line.
 func askYesNo(p *promptIO, question string, def bool) (bool, error) {
-	suffix := " [y/N]: "
+	suffix := dim(" [y/N] ")
 	if def {
-		suffix = " [Y/n]: "
+		suffix = dim(" [Y/n] ")
 	}
 	fmt.Fprint(p.out, question+suffix)
 
@@ -224,20 +366,8 @@ func groupByProvider(models []database.Model) []providerGroup {
 	return groups
 }
 
-func providerKeyEnv(provider string) string {
-	if p, ok := router.Providers[provider]; ok {
-		return p.KeyEnv
-	}
-	return strings.ToUpper(provider) + "_API_KEY"
-}
-
-func isTerminal(r io.Reader) bool {
-	f, ok := r.(*os.File)
-	return ok && term.IsTerminal(int(f.Fd()))
-}
-
 // printCatalog prints the current model catalog with enabled state.
-func printCatalog(out io.Writer, db *database.DB, note string) error {
+func printCatalog(out io.Writer, db *database.DB, summary string) error {
 	models, err := db.AllModels()
 	if err != nil {
 		return err
@@ -248,14 +378,24 @@ func printCatalog(out io.Writer, db *database.DB, note string) error {
 			enabled++
 		}
 	}
-	fmt.Fprintf(out, "%s — %d/%d models enabled:\n", note, enabled, len(models))
-	for _, m := range models {
-		mark := "x"
-		if m.Enabled {
-			mark = "✓"
-		}
-		fmt.Fprintf(out, "  [%s] %-22s provider=%-10s cost=%.2f intents=[%s]\n",
-			mark, m.Identifier, m.Provider, m.CostMultiplier, m.IntentTags)
-	}
+	info(out, "%s", summary)
+	fmt.Fprintf(out, "%s\n", dim(fmt.Sprintf("%d of %d models enabled", enabled, len(models))))
+	renderModelTable(out, models)
 	return nil
+}
+
+// renderModelTable prints models as an aligned, glyph-marked list.
+func renderModelTable(out io.Writer, models []database.Model) {
+	for _, m := range models {
+		mark := gray(glyphOff)
+		name := dim(m.Identifier)
+		if m.Enabled {
+			mark = green(glyphOK)
+			name = m.Identifier
+		}
+		fmt.Fprintf(out, "  %s %-24s %s  %s\n",
+			mark, name,
+			gray(fmt.Sprintf("%-10s", m.Provider)),
+			gray(fmt.Sprintf("cost %.2f · %s", m.CostMultiplier, m.IntentTags)))
+	}
 }

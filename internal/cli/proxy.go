@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -42,13 +44,16 @@ Provider keys are read from the environment:
 			}
 			defer func() { _ = db.Close() }()
 
+			keys, err := config.LoadKeys()
+			if err != nil {
+				return err
+			}
 			client := &http.Client{Timeout: 5 * time.Minute}
 			rtr := router.New(db, client)
-			if keys, err := config.LoadKeys(); err != nil {
-				return err
-			} else {
-				rtr.SetFileKeys(keys.Providers)
-			}
+			rtr.SetFileKeys(keys.Providers)
+
+			printProxyBanner(cmd.OutOrStdout(), db, keys)
+
 			logger := log.New(cmd.OutOrStdout(), "", log.LstdFlags)
 			srv := network.NewServer(db, rtr, logger)
 
@@ -61,4 +66,29 @@ Provider keys are read from the environment:
 
 	cmd.Flags().IntVarP(&port, "port", "p", network.DefaultPort, "preferred loopback port (scans upward if busy)")
 	return cmd
+}
+
+// printProxyBanner shows a concise readiness summary: enabled models and which
+// providers actually have a usable key.
+func printProxyBanner(out io.Writer, db *database.DB, keys *config.Keys) {
+	header(out, "proxy")
+
+	models, err := db.EnabledModels()
+	if err != nil {
+		return
+	}
+	providers, _ := db.ProvidersMap()
+
+	ready := 0
+	for _, m := range models {
+		p := providers[m.Provider]
+		if !p.NeedsKey || os.Getenv(p.KeyEnv) != "" || keys.Get(p.Name) != "" {
+			ready++
+		}
+	}
+	info(out, "%d models enabled, %s ready to route", len(models),
+		fmt.Sprintf("%d", ready))
+	if ready == 0 {
+		warn(out, "no model has a usable key — run 'llmroute init' or 'llmroute keys set <provider>'")
+	}
 }

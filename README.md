@@ -232,15 +232,58 @@ $ curl -s http://127.0.0.1:4040/v1/chat/completions \
 
 ## Commands
 
-| Command           | Description                                                      |
-| ----------------- | ---------------------------------------------------------------- |
-| `llmroute init`   | Interactive setup: create the config dir/db, choose which models to enable, and store provider keys (mode `0600`). `--yes/-y` enables all models and skips key prompts. |
-| `llmroute proxy`  | Boot the loopback routing gateway. `-p/--port` sets the preferred port (default `4040`). |
-| `llmroute stats`  | Print per-model request counts and token volumes.                |
+| Command                         | Description                                                      |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `llmroute init`                 | Interactive setup: create the config dir/db, choose which models to enable, and store provider keys (mode `0600`). `--yes/-y` enables all models and skips key prompts. |
+| `llmroute proxy`                | Boot the loopback routing gateway. `-p/--port` sets the preferred port (default `4040`). |
+| `llmroute stats`                | Print per-model request counts and token volumes.                |
+| `llmroute keys list`            | Show providers and key status (values masked).                   |
+| `llmroute keys set <provider>`  | Set/update one provider's key (hidden prompt, or `--stdin`).     |
+| `llmroute keys rm <provider>`   | Remove a stored key.                                             |
+| `llmroute models list`          | Show the catalog and provider endpoints.                         |
+| `llmroute models add …`         | Register a custom or local model (and its provider if new).      |
+| `llmroute models rm <id>`       | Remove a model.                                                  |
+| `llmroute models enable/disable <id>` | Toggle a model for routing.                                |
 
 Only **enabled** models participate in routing; disabled ones stay in the
 catalog (visible in `init`'s summary) but are skipped. Re-run `llmroute init`
-any time to change selections or update keys.
+any time to change selections, or use `llmroute models`/`llmroute keys` for
+targeted changes.
+
+Output is colorized on a terminal; set `NO_COLOR=1` to disable.
+
+### Custom & local models
+
+`llmroute` providers are data-driven, so you can route to any OpenAI-compatible
+endpoint — including local runtimes like **Ollama**, **LM Studio**, or
+**llama.cpp** — with no API key:
+
+```sh
+# register a local Ollama model
+llmroute models add --provider ollama \
+  --base-url http://localhost:11434/v1/chat/completions \
+  --id gemma3:27b --intents chat,code --no-key
+
+llmroute proxy
+# a chat/code request now routes to your local model — no key, no quota:
+#   x-llmroute-model: gemma3:27b
+```
+
+Providers added with `--no-key` are dispatched without an `Authorization`
+header. To add another cloud provider (e.g. **Groq**, **Cerebras**), pass
+`--base-url` and (optionally) `--key-env`, then store its key with
+`llmroute keys set <provider>`:
+
+```sh
+llmroute models add --provider groq \
+  --base-url https://api.groq.com/openai/v1/chat/completions \
+  --id llama-3.3-70b-versatile --intents chat,code --key-env GROQ_API_KEY
+llmroute keys set groq
+```
+
+The interactive `llmroute init` wizard also offers an **"add a custom provider"**
+step at the end, prompting for the name, base URL, key requirement, model, and
+key — no flags needed.
 
 ---
 
@@ -294,9 +337,10 @@ an exported `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
 ```
 
 State lives in `~/.config/llmroute/` (honoring `XDG_CONFIG_HOME`):
-`records.db` holds the `models` (with their enabled flag) and `usage_logs`
-tables; `keys.json` (mode `0600`) holds provider API keys entered via
-`llmroute init`.
+`records.db` holds the `models` (with their enabled flag), `providers`
+(endpoints, incl. custom/local), and `usage_logs` tables; `keys.json`
+(mode `0600`) holds provider API keys entered via `llmroute init` or
+`llmroute keys set`.
 
 ---
 

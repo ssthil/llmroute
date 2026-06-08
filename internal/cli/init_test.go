@@ -77,6 +77,64 @@ func TestRunWizardSelectionAndKeys(t *testing.T) {
 	}
 }
 
+func TestAddCustomProviderInteractive(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	db, err := database.Open(filepath.Join(t.TempDir(), "records.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// add groq (needs key, default env, cost 0.1), then decline a second one.
+	answers := strings.Join([]string{
+		"y",    // add a custom provider?
+		"groq", // provider name
+		"https://api.groq.com/openai/v1/chat/completions", // base URL
+		"y",             // requires an API key?
+		"",              // key env var -> default GROQ_API_KEY
+		"llama-3.3-70b", // model id
+		"chat,code",     // intents
+		"0.1",           // cost
+		"n",             // add another? no
+	}, "\n") + "\n"
+
+	keys := &config.Keys{Providers: map[string]string{}}
+	pio := &promptIO{
+		in:     bufio.NewReader(strings.NewReader(answers)),
+		out:    io.Discard,
+		secret: func() (string, error) { return "gsk-test-key", nil },
+	}
+
+	if err := addCustomProviders(db, keys, pio); err != nil {
+		t.Fatalf("addCustomProviders: %v", err)
+	}
+
+	prov, err := db.Provider("groq")
+	if err != nil {
+		t.Fatalf("groq provider not created: %v", err)
+	}
+	if prov.BaseURL != "https://api.groq.com/openai/v1/chat/completions" || prov.KeyEnv != "GROQ_API_KEY" || !prov.NeedsKey {
+		t.Errorf("groq provider = %+v", prov)
+	}
+
+	all, _ := db.AllModels()
+	var found *database.Model
+	for i := range all {
+		if all[i].Identifier == "llama-3.3-70b" {
+			found = &all[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("llama-3.3-70b model not added")
+	}
+	if found.Provider != "groq" || found.IntentTags != "chat,code" || found.CostMultiplier != 0.1 || !found.Enabled {
+		t.Errorf("model = %+v", *found)
+	}
+	if keys.Get("groq") != "gsk-test-key" {
+		t.Errorf("groq key = %q", keys.Get("groq"))
+	}
+}
+
 func TestAskYesNoDefaults(t *testing.T) {
 	cases := []struct {
 		line string

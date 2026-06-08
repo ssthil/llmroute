@@ -26,21 +26,9 @@ const (
 	IntentChat   Intent = "chat"
 )
 
-// Provider describes how to reach an upstream OpenAI-compatible endpoint.
-type Provider struct {
-	Name    string // matches database.Model.Provider
-	BaseURL string // full chat-completions URL
-	KeyEnv  string // environment variable holding the bearer token
-}
-
-// Providers is the registry of supported upstreams. Each exposes an
-// OpenAI-compatible /chat/completions surface.
-var Providers = map[string]Provider{
-	"openai":    {Name: "openai", BaseURL: "https://api.openai.com/v1/chat/completions", KeyEnv: "OPENAI_API_KEY"},
-	"gemini":    {Name: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", KeyEnv: "GEMINI_API_KEY"},
-	"anthropic": {Name: "anthropic", BaseURL: "https://api.anthropic.com/v1/chat/completions", KeyEnv: "ANTHROPIC_API_KEY"},
-	"deepseek":  {Name: "deepseek", BaseURL: "https://api.deepseek.com/v1/chat/completions", KeyEnv: "DEEPSEEK_API_KEY"},
-}
+// Provider is re-exported from the database package so callers in this package
+// read naturally. Endpoints live in the providers table, not in code.
+type Provider = database.Provider
 
 var (
 	// codeRe matches fenced code blocks, common programming keywords, stack
@@ -135,17 +123,27 @@ func (r *Router) Dispatch(ctx context.Context, body []byte) (*Result, Intent, er
 	if err != nil {
 		return nil, intent, err
 	}
+	providers, err := r.db.ProvidersMap()
+	if err != nil {
+		return nil, intent, err
+	}
 
 	var lastErr error
 	for _, m := range candidates {
-		prov, ok := Providers[m.Provider]
+		prov, ok := providers[m.Provider]
 		if !ok {
+			lastErr = fmt.Errorf("model %q references unknown provider %q", m.Identifier, m.Provider)
 			continue
 		}
-		key := r.resolveKey(prov)
-		if key == "" {
-			lastErr = fmt.Errorf("provider %q: no API key (set %s or run 'llmroute init')", prov.Name, prov.KeyEnv)
-			continue
+
+		// Local providers (needs_key=false) dispatch without an API key.
+		var key string
+		if prov.NeedsKey {
+			key = r.resolveKey(prov)
+			if key == "" {
+				lastErr = fmt.Errorf("provider %q: no API key (set %s or run 'llmroute init')", prov.Name, prov.KeyEnv)
+				continue
+			}
 		}
 
 		upstreamBody, err := rewriteModel(body, m.Identifier)
@@ -160,7 +158,9 @@ func (r *Router) Dispatch(ctx context.Context, body []byte) (*Result, Intent, er
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+key)
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
 
 		resp, err := r.client.Do(req)
 		if err != nil {
