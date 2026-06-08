@@ -384,18 +384,20 @@ func printCatalog(out io.Writer, db *database.DB, summary string) error {
 	return nil
 }
 
-// renderModelTable prints models as an aligned, glyph-marked list.
+// renderModelTable prints models as an aligned, glyph-marked list. Width
+// padding is applied to the plain text *before* colorizing, so ANSI escape
+// bytes never count toward column width.
 func renderModelTable(out io.Writer, models []database.Model) {
 	for _, m := range models {
 		mark := gray(glyphOff)
-		name := dim(m.Identifier)
+		name := fmt.Sprintf("%-24s", m.Identifier)
 		if m.Enabled {
 			mark = green(glyphOK)
-			name = m.Identifier
+		} else {
+			name = dim(name)
 		}
-		fmt.Fprintf(out, "  %s %-24s %s  %s\n",
-			mark, name,
-			gray(fmt.Sprintf("%-10s", m.Provider)),
-			gray(fmt.Sprintf("cost %.2f · %s", m.CostMultiplier, m.IntentTags)))
+		provider := gray(fmt.Sprintf("%-10s", m.Provider))
+		meta := gray(fmt.Sprintf("cost %.2f · %s", m.CostMultiplier, m.IntentTags))
+		fmt.Fprintf(out, "  %s %s %s %s\n", mark, name, provider, meta)
 	}
 }
