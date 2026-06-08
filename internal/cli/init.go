@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -90,8 +89,9 @@ type promptIO struct {
 	secret func() (string, error) // reads one line without echoing
 }
 
-// runWizard walks the catalog grouped by provider: each model is toggled
-// on/off, and providers with at least one enabled model are prompted for a key.
+// runWizard shows the full catalog as a numbered list, applies a single
+// multi-select choice, then prompts for the API key of each enabled
+// key-requiring provider and offers to add custom providers.
 func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 	models, err := db.AllModels()
 	if err != nil {
@@ -101,50 +101,66 @@ func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 	if err != nil {
 		return err
 	}
-	groups := groupByProvider(models)
 
-	fmt.Fprintln(p.out, dim("Choose which models to enable, then add each provider's API key."))
-	fmt.Fprintln(p.out, dim("Press Enter to accept the [default]; keys are hidden as you type."))
+	fmt.Fprintln(p.out, dim("Pick the models to enable. Keys are entered next (hidden)."))
+	fmt.Fprintln(p.out)
+	for i, m := range models {
+		mark := gray(glyphOff)
+		if m.Enabled {
+			mark = green(glyphOK)
+		}
+		local := ""
+		if prov := providers[m.Provider]; !prov.NeedsKey {
+			local = gray(" · local")
+		}
+		fmt.Fprintf(p.out, "  %s %s %s %s\n",
+			gray(fmt.Sprintf("%2d.", i+1)), mark,
+			fmt.Sprintf("%-24s", m.Identifier),
+			gray(fmt.Sprintf("%-10s cost %.2f · %s%s", m.Provider, m.CostMultiplier, m.IntentTags, local)))
+	}
 	fmt.Fprintln(p.out)
 
-	for _, g := range groups {
-		local := ""
-		if prov := providers[g.provider]; !prov.NeedsKey {
-			local = gray(" (local)")
+	sel, err := askLine(p, "enable which? "+dim("[a]ll / [n]one / numbers e.g. 1,3,5 / Enter=keep"), "")
+	if err != nil {
+		return err
+	}
+	mode, set := parseSelection(sel, len(models))
+	for i, m := range models {
+		var enabled bool
+		switch mode {
+		case selKeep:
+			enabled = m.Enabled
+		case selAll:
+			enabled = true
+		case selNone:
+			enabled = false
+		case selSubset:
+			enabled = set[i+1]
 		}
-		fmt.Fprintf(p.out, "%s %s%s\n", cyan(glyphDot), bold(g.provider), local)
-		anyEnabled := false
-		for _, m := range g.models {
-			label := fmt.Sprintf("  enable %s %s", m.Identifier,
-				gray(fmt.Sprintf("(%s · cost %.2f)", m.IntentTags, m.CostMultiplier)))
-			enable, err := askYesNo(p, label, m.Enabled)
-			if err != nil {
-				return err
-			}
-			if err := db.SetModelEnabled(m.Identifier, enable); err != nil {
-				return err
-			}
-			if enable {
-				anyEnabled = true
-			}
+		if err := db.SetModelEnabled(m.Identifier, enabled); err != nil {
+			return err
 		}
+	}
 
-		if !anyEnabled {
-			note(p.out, "no %s models enabled — skipping key", g.provider)
-			fmt.Fprintln(p.out)
+	// Prompt for keys of providers backing the now-enabled models.
+	enabled, err := db.EnabledModels()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(p.out)
+	seen := map[string]bool{}
+	for _, m := range enabled {
+		if seen[m.Provider] {
 			continue
 		}
-
-		prov := providers[g.provider]
+		seen[m.Provider] = true
+		prov := providers[m.Provider]
 		if !prov.NeedsKey {
-			note(p.out, "%s is local/no-key — nothing to enter", g.provider)
-			fmt.Fprintln(p.out)
 			continue
 		}
 		if err := promptProviderKey(p, keys, prov); err != nil {
 			return err
 		}
-		fmt.Fprintln(p.out)
 	}
 
 	if err := addCustomProviders(db, keys, p); err != nil {
@@ -157,6 +173,40 @@ func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 	path, _ := config.KeysPath()
 	success(p.out, "saved provider keys to %s %s", path, gray("(0600)"))
 	return nil
+}
+
+// selection modes for parseSelection.
+const (
+	selKeep   = "keep"
+	selAll    = "all"
+	selNone   = "none"
+	selSubset = "subset"
+)
+
+// parseSelection interprets a multi-select reply against an n-item list.
+// "" keeps current, "a"/"all" selects all, "n"/"none" clears, and a
+// comma-separated list selects those 1-based indices (out-of-range ignored).
+func parseSelection(input string, n int) (string, map[int]bool) {
+	s := strings.ToLower(strings.TrimSpace(input))
+	switch s {
+	case "":
+		return selKeep, nil
+	case "a", "all":
+		return selAll, nil
+	case "n", "none":
+		return selNone, nil
+	}
+	set := map[int]bool{}
+	for _, tok := range strings.Split(s, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		if i, err := strconv.Atoi(tok); err == nil && i >= 1 && i <= n {
+			set[i] = true
+		}
+	}
+	return selSubset, set
 }
 
 // addCustomProviders lets the user register their own OpenAI-compatible
@@ -337,33 +387,6 @@ func askYesNo(p *promptIO, question string, def bool) (bool, error) {
 		// Treat anything unexpected as the default to keep the flow moving.
 		return def, nil
 	}
-}
-
-type providerGroup struct {
-	provider string
-	models   []database.Model
-}
-
-// groupByProvider buckets models by provider, ordering providers alphabetically
-// and models cheapest-first within each.
-func groupByProvider(models []database.Model) []providerGroup {
-	byProv := map[string][]database.Model{}
-	for _, m := range models {
-		byProv[m.Provider] = append(byProv[m.Provider], m)
-	}
-	names := make([]string, 0, len(byProv))
-	for name := range byProv {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	groups := make([]providerGroup, 0, len(names))
-	for _, name := range names {
-		ms := byProv[name]
-		sort.SliceStable(ms, func(i, j int) bool { return ms[i].CostMultiplier < ms[j].CostMultiplier })
-		groups = append(groups, providerGroup{provider: name, models: ms})
-	}
-	return groups
 }
 
 // printCatalog prints the current model catalog with enabled state.

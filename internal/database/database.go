@@ -147,9 +147,14 @@ var seedProviders = []Provider{
 	{Name: "gemini", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", KeyEnv: "GEMINI_API_KEY", NeedsKey: true},
 	{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1/chat/completions", KeyEnv: "ANTHROPIC_API_KEY", NeedsKey: true},
 	{Name: "deepseek", BaseURL: "https://api.deepseek.com/v1/chat/completions", KeyEnv: "DEEPSEEK_API_KEY", NeedsKey: true},
+	{Name: "mistral", BaseURL: "https://api.mistral.ai/v1/chat/completions", KeyEnv: "MISTRAL_API_KEY", NeedsKey: true},
+	{Name: "xai", BaseURL: "https://api.x.ai/v1/chat/completions", KeyEnv: "XAI_API_KEY", NeedsKey: true},
+	{Name: "qwen", BaseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions", KeyEnv: "DASHSCOPE_API_KEY", NeedsKey: true},
 }
 
-// seedModels is the baseline routing matrix inserted on first boot.
+// seedModels is the baseline routing matrix inserted on first boot. Model ids
+// are flagship picks per provider; they can drift over time — edit with
+// 'llmroute models add/rm' if a provider renames one.
 var seedModels = []Model{
 	{Provider: "gemini", Identifier: "gemini-2.5-flash", CostMultiplier: 0.30, IntentTags: "vision,chat"},
 	{Provider: "gemini", Identifier: "gemini-2.5-pro", CostMultiplier: 1.00, IntentTags: "vision,chat,code"},
@@ -158,6 +163,11 @@ var seedModels = []Model{
 	{Provider: "openai", Identifier: "gpt-4o", CostMultiplier: 2.50, IntentTags: "vision,chat,code"},
 	{Provider: "deepseek", Identifier: "deepseek-chat", CostMultiplier: 0.14, IntentTags: "chat,code"},
 	{Provider: "deepseek", Identifier: "deepseek-reasoner", CostMultiplier: 0.55, IntentTags: "code"},
+	{Provider: "mistral", Identifier: "mistral-large-latest", CostMultiplier: 2.00, IntentTags: "code,chat"},
+	{Provider: "mistral", Identifier: "mistral-small-latest", CostMultiplier: 0.20, IntentTags: "chat,code"},
+	{Provider: "xai", Identifier: "grok-3", CostMultiplier: 2.00, IntentTags: "chat,code"},
+	{Provider: "qwen", Identifier: "qwen-max", CostMultiplier: 1.60, IntentTags: "chat,code"},
+	{Provider: "qwen", Identifier: "qwen-plus", CostMultiplier: 0.40, IntentTags: "chat,code"},
 }
 
 // Seed inserts the baseline models. It is idempotent: existing identifiers are

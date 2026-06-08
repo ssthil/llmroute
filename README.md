@@ -52,7 +52,7 @@ named `llmroute_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows).
 **Linux / macOS:**
 
 ```sh
-VERSION=0.3.0   # latest release — see the releases page
+VERSION=0.4.0   # latest release — see the releases page
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux | darwin
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # amd64 | arm64
 FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
@@ -96,13 +96,13 @@ go install github.com/ssthil/llmroute@latest   # latest tagged release
 make build      # produces ./bin/llmroute
 ```
 
-### Upgrading (e.g. 0.2.0 → 0.3.0)
+### Upgrading (e.g. 0.3.0 → 0.4.0)
 
 Replace the binary in place — your config and data are preserved:
 
 ```sh
 cd $(mktemp -d)
-VERSION=0.3.0
+VERSION=0.4.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
 curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/${FILE}"
@@ -144,16 +144,21 @@ curl http://127.0.0.1:4040/v1/chat/completions \
 llmroute stats
 ```
 
-The interactive `init` walks the catalog provider-by-provider, lets you enable
-models one at a time, and prompts (with hidden input) for each enabled
-provider's API key:
+The interactive `init` shows the full numbered catalog, takes a single
+selection, then prompts (with hidden input) for the key of each enabled
+provider:
 
 ```text
-DEEPSEEK
-  enable deepseek-chat (intents: chat,code, cost 0.14)? [Y/n]: y
-  enable deepseek-reasoner (intents: code, cost 0.55)? [Y/n]: n
-  deepseek API key: ********
+   1. ✓ deepseek-chat            deepseek   cost 0.14 · chat,code
+   2. ✓ mistral-small-latest     mistral    cost 0.20 · chat,code
+   3. ✓ gemini-2.5-flash         gemini     cost 0.30 · vision,chat
+   …
+→ enable which? [a]ll / [n]one / numbers e.g. 1,3,5 / Enter=keep: 1,3
+→ deepseek API key: ********
 ```
+
+It also ends with an **"add a custom provider"** step (for Groq, Cerebras, a
+local Ollama, …).
 
 Keys are written to `~/.config/llmroute/keys.json` (mode `0600`). An exported
 environment variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`,
@@ -327,20 +332,30 @@ key — no flags needed.
 
 ### Seeded model catalog
 
-| Model                | Provider  | Cost× | Intents              |
-| -------------------- | --------- | ----- | -------------------- |
-| `deepseek-chat`      | deepseek  | 0.14  | chat, code           |
-| `gemini-2.5-flash`   | gemini    | 0.30  | vision, chat         |
-| `deepseek-reasoner`  | deepseek  | 0.55  | code                 |
-| `claude-3-5-haiku`   | anthropic | 0.80  | chat                 |
-| `gemini-2.5-pro`     | gemini    | 1.00  | vision, chat, code   |
-| `gpt-4o`             | openai    | 2.50  | vision, chat, code   |
-| `claude-3-5-sonnet`  | anthropic | 3.00  | code, chat           |
+| Model                  | Provider  | Cost× | Intents              |
+| ---------------------- | --------- | ----- | -------------------- |
+| `deepseek-chat`        | deepseek  | 0.14  | chat, code           |
+| `mistral-small-latest` | mistral   | 0.20  | chat, code           |
+| `gemini-2.5-flash`     | gemini    | 0.30  | vision, chat         |
+| `qwen-plus`            | qwen      | 0.40  | chat, code           |
+| `deepseek-reasoner`    | deepseek  | 0.55  | code                 |
+| `claude-3-5-haiku`     | anthropic | 0.80  | chat                 |
+| `gemini-2.5-pro`       | gemini    | 1.00  | vision, chat, code   |
+| `qwen-max`             | qwen      | 1.60  | chat, code           |
+| `mistral-large-latest` | mistral   | 2.00  | code, chat           |
+| `grok-3`               | xai       | 2.00  | chat, code           |
+| `gpt-4o`               | openai    | 2.50  | vision, chat, code   |
+| `claude-3-5-sonnet`    | anthropic | 3.00  | code, chat           |
 
-Provider keys are resolved **environment-first, then the stored key store**:
-an exported `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` /
-`DEEPSEEK_API_KEY` overrides whatever `llmroute init` saved in
-`~/.config/llmroute/keys.json`.
+Seeded model ids are flagship picks and may drift as providers rename them —
+adjust with `llmroute models add/rm`. Provider keys are resolved
+**environment-first, then the stored key store**: an exported `OPENAI_API_KEY` /
+`GEMINI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` / `MISTRAL_API_KEY` /
+`XAI_API_KEY` / `DASHSCOPE_API_KEY` (Qwen) overrides whatever `llmroute init`
+saved in `~/.config/llmroute/keys.json`.
+
+Run `llmroute` with no arguments any time to see the catalog and what's
+enabled.
 
 ---
 

@@ -11,71 +11,95 @@ import (
 	"github.com/ssthil/llmroute/internal/database"
 )
 
-func TestRunWizardSelectionAndKeys(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+func TestParseSelection(t *testing.T) {
+	cases := []struct {
+		in       string
+		n        int
+		wantMode string
+		wantSet  []int
+	}{
+		{"", 5, selKeep, nil},
+		{"a", 5, selAll, nil},
+		{"all", 5, selAll, nil},
+		{"n", 5, selNone, nil},
+		{"none", 5, selNone, nil},
+		{"1,3,5", 5, selSubset, []int{1, 3, 5}},
+		{" 2 , 4 ", 5, selSubset, []int{2, 4}},
+		{"1,99,3", 5, selSubset, []int{1, 3}}, // out-of-range dropped
+		{"x,2", 5, selSubset, []int{2}},       // non-numeric dropped
+	}
+	for _, tc := range cases {
+		mode, set := parseSelection(tc.in, tc.n)
+		if mode != tc.wantMode {
+			t.Errorf("parseSelection(%q) mode = %q, want %q", tc.in, mode, tc.wantMode)
+		}
+		for _, i := range tc.wantSet {
+			if !set[i] {
+				t.Errorf("parseSelection(%q) missing %d", tc.in, i)
+			}
+		}
+		if tc.wantSet != nil && len(set) != len(tc.wantSet) {
+			t.Errorf("parseSelection(%q) set size = %d, want %d", tc.in, len(set), len(tc.wantSet))
+		}
+	}
+}
 
+func TestRunWizardSelectNone(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	db, err := database.Open(filepath.Join(t.TempDir(), "records.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	// Providers are walked alphabetically: anthropic, deepseek, gemini, openai.
-	// Within each, models are cheapest-first.
-	//   anthropic: haiku, sonnet   -> n, n        (no key)
-	//   deepseek:  chat,  reasoner -> y, n        (key #1)
-	//   gemini:    flash, pro      -> n, n        (no key)
-	//   openai:    gpt-4o          -> y           (key #2)
-	answers := "n\nn\n" + "y\nn\n" + "n\nn\n" + "y\n"
-
-	secrets := []string{"sk-deepseek-key", "sk-openai-key"}
-	var si int
-	keys := &config.Keys{Providers: map[string]string{}}
-
+	// select none, then decline adding a custom provider.
 	pio := &promptIO{
-		in:  bufio.NewReader(strings.NewReader(answers)),
-		out: io.Discard,
-		secret: func() (string, error) {
-			s := secrets[si]
-			si++
-			return s, nil
-		},
+		in:     bufio.NewReader(strings.NewReader("n\nn\n")),
+		out:    io.Discard,
+		secret: func() (string, error) { return "", nil },
 	}
-
-	if err := runWizard(db, keys, pio); err != nil {
+	if err := runWizard(db, keysEmpty(), pio); err != nil {
 		t.Fatalf("runWizard: %v", err)
-	}
-
-	// Expected enabled state.
-	want := map[string]bool{
-		"claude-3-5-haiku":  false,
-		"claude-3-5-sonnet": false,
-		"deepseek-chat":     true,
-		"deepseek-reasoner": false,
-		"gemini-2.5-flash":  false,
-		"gemini-2.5-pro":    false,
-		"gpt-4o":            true,
 	}
 	all, _ := db.AllModels()
 	for _, m := range all {
-		if w, ok := want[m.Identifier]; ok && m.Enabled != w {
-			t.Errorf("%s enabled = %v, want %v", m.Identifier, m.Enabled, w)
+		if m.Enabled {
+			t.Errorf("%s should be disabled after selecting none", m.Identifier)
 		}
 	}
+}
 
-	if keys.Get("deepseek") != "sk-deepseek-key" {
-		t.Errorf("deepseek key = %q", keys.Get("deepseek"))
+func TestRunWizardSelectAllPromptsEachProviderKey(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	db, err := database.Open(filepath.Join(t.TempDir(), "records.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
 	}
-	if keys.Get("openai") != "sk-openai-key" {
-		t.Errorf("openai key = %q", keys.Get("openai"))
+	t.Cleanup(func() { _ = db.Close() })
+
+	var secretCalls int
+	pio := &promptIO{
+		in:     bufio.NewReader(strings.NewReader("a\nn\n")), // all, then no custom
+		out:    io.Discard,
+		secret: func() (string, error) { secretCalls++; return "", nil },
 	}
-	if keys.Get("anthropic") != "" || keys.Get("gemini") != "" {
-		t.Errorf("unexpected keys stored for disabled providers: %v", keys.Providers)
+	if err := runWizard(db, keysEmpty(), pio); err != nil {
+		t.Fatalf("runWizard: %v", err)
 	}
-	if si != 2 {
-		t.Errorf("expected exactly 2 key prompts, got %d", si)
+	all, _ := db.AllModels()
+	for _, m := range all {
+		if !m.Enabled {
+			t.Errorf("%s should be enabled after selecting all", m.Identifier)
+		}
+	}
+	// One key prompt per distinct key-requiring provider (all 7 seeds need keys).
+	provs, _ := db.AllProviders()
+	if secretCalls != len(provs) {
+		t.Errorf("key prompts = %d, want one per provider (%d)", secretCalls, len(provs))
 	}
 }
+
+func keysEmpty() *config.Keys { return &config.Keys{Providers: map[string]string{}} }
 
 func TestAddCustomProviderInteractive(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

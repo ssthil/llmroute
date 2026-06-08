@@ -4,6 +4,28 @@ All notable changes to llmroute are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-08
+
+### Added
+- **Expanded default catalog** — seeds now include **Mistral**
+  (`mistral-large-latest`, `mistral-small-latest`), **xAI** (`grok-3`), and
+  **Qwen** (`qwen-max`, `qwen-plus`) alongside OpenAI/Gemini/Anthropic/DeepSeek
+  (12 flagship models across 7 providers).
+- **Multi-select `init`** — the wizard now shows the full numbered catalog and
+  takes one selection (`all` / `none` / `1,3,5` / Enter to keep) instead of a
+  prompt per model, then asks for the key of each enabled provider.
+- **Bare `llmroute`** prints the model catalog with status (or a getting-started
+  hint if not yet set up) instead of generic help.
+
+### Fixed
+- Model table alignment: width padding is applied to plain text before
+  colorizing, so ANSI escape bytes no longer skew the columns.
+
+### Upgrade notes
+- Upgrading from 0.3.0 is seamless. New seed providers/models are added on first
+  open (existing rows, enabled flags, and keys are untouched). Seeded model ids
+  are flagship picks and may drift — adjust with `llmroute models add/rm`.
+
 ## [0.3.0] - 2026-06-08
 
 ### Added
@@ -50,6 +72,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   state, pure-Go SQLite usage accounting, and the `init`/`proxy`/`stats`
   commands.
 
+[0.4.0]: https://github.com/ssthil/llmroute/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ssthil/llmroute/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ssthil/llmroute/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ssthil/llmroute/releases/tag/v0.1.0
