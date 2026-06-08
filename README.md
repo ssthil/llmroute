@@ -52,7 +52,7 @@ named `llmroute_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows).
 **Linux / macOS:**
 
 ```sh
-VERSION=0.2.0   # latest release — see the releases page
+VERSION=0.3.0   # latest release — see the releases page
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux | darwin
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # amd64 | arm64
 FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
