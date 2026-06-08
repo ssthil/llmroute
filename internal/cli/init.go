@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -97,10 +100,93 @@ type promptIO struct {
 	secret func() (string, error) // reads one line without echoing
 }
 
-// runWizard shows the full catalog as a numbered list, applies a single
-// multi-select choice, then prompts for the API key of each enabled
-// key-requiring provider and offers to add custom providers.
+// access modes for the opening prompt.
+const (
+	accessAPI   = "api"
+	accessLocal = "local"
+	accessBoth  = "both"
+)
+
+// runWizard asks how the user accesses models, then runs the matching setup:
+// API keys (cloud catalog), local models (Ollama/LM Studio), or both.
 func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
+	mode, err := askAccessMode(p)
+	if err != nil {
+		return err
+	}
+
+	switch mode {
+	case accessLocal:
+		// Start clean so only the local models the user adds are enabled.
+		if err := disableAllModels(db); err != nil {
+			return err
+		}
+	default: // api or both
+		if err := selectCloudModels(db, keys, p); err != nil {
+			return err
+		}
+	}
+
+	if mode == accessLocal || mode == accessBoth {
+		if err := setupLocalModels(db, p); err != nil {
+			return err
+		}
+	}
+
+	if err := addCustomProviders(db, keys, p); err != nil {
+		return err
+	}
+
+	if err := keys.Save(); err != nil {
+		return err
+	}
+	path, _ := config.KeysPath()
+	success(p.out, "saved provider keys to %s %s", path, gray("(0600)"))
+	return nil
+}
+
+// askAccessMode asks whether the user has provider API keys, runs local models,
+// or both — so subscription-only users are guided to local models (the legit,
+// no-key path) instead of expecting a Claude Pro / ChatGPT Plus login to work.
+func askAccessMode(p *promptIO) (string, error) {
+	fmt.Fprintln(p.out, bold("How will you access models?"))
+	fmt.Fprintf(p.out, "  %s %s %s\n", cyan("1."), bold(fmt.Sprintf("%-18s", "API keys")), gray("OpenAI, Gemini, Anthropic, Mistral, … (usage-based API plans)"))
+	fmt.Fprintf(p.out, "  %s %s %s\n", cyan("2."), bold(fmt.Sprintf("%-18s", "Local models")), gray("Ollama / LM Studio — free, no key, runs on your machine"))
+	fmt.Fprintf(p.out, "  %s %s %s\n", cyan("3."), bold(fmt.Sprintf("%-18s", "Both")), gray("cloud API keys and local models"))
+	note(p.out, "chat subscriptions (Claude Pro, ChatGPT Plus) don't include API access — pick 2 for those")
+	fmt.Fprintln(p.out)
+
+	ans, err := askLine(p, "choose", "1")
+	if err != nil {
+		return "", err
+	}
+	switch strings.TrimSpace(ans) {
+	case "2", "local":
+		return accessLocal, nil
+	case "3", "both":
+		return accessBoth, nil
+	default:
+		return accessAPI, nil
+	}
+}
+
+// disableAllModels turns off every catalog model (used for a local-only setup).
+func disableAllModels(db *database.DB) error {
+	models, err := db.AllModels()
+	if err != nil {
+		return err
+	}
+	for _, m := range models {
+		if err := db.SetModelEnabled(m.Identifier, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// selectCloudModels lists the catalog, applies a multi-select, then prompts for
+// the API key of each enabled key-requiring provider.
+func selectCloudModels(db *database.DB, keys *config.Keys, p *promptIO) error {
 	models, err := db.AllModels()
 	if err != nil {
 		return err
@@ -110,6 +196,7 @@ func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 		return err
 	}
 
+	fmt.Fprintln(p.out)
 	fmt.Fprintln(p.out, dim("Pick the models to enable. Keys are entered next (hidden)."))
 	fmt.Fprintln(p.out)
 	for i, m := range models {
@@ -170,16 +257,6 @@ func runWizard(db *database.DB, keys *config.Keys, p *promptIO) error {
 			return err
 		}
 	}
-
-	if err := addCustomProviders(db, keys, p); err != nil {
-		return err
-	}
-
-	if err := keys.Save(); err != nil {
-		return err
-	}
-	path, _ := config.KeysPath()
-	success(p.out, "saved provider keys to %s %s", path, gray("(0600)"))
 	return nil
 }
 
@@ -215,6 +292,109 @@ func parseSelection(input string, n int) (string, map[int]bool) {
 		}
 	}
 	return selSubset, set
+}
+
+// localModelLister returns installed model ids from an OpenAI-compatible
+// /models endpoint derived from a chat-completions URL. Overridable in tests.
+var localModelLister = httpListLocalModels
+
+func httpListLocalModels(chatURL string) ([]string, error) {
+	modelsURL := strings.Replace(chatURL, "/chat/completions", "/models", 1)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(modelsURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(payload.Data))
+	for _, m := range payload.Data {
+		ids = append(ids, m.ID)
+	}
+	return ids, nil
+}
+
+// localProviderName picks a friendly provider name from a local base URL.
+func localProviderName(u string) string {
+	switch {
+	case strings.Contains(u, ":11434"):
+		return "ollama"
+	case strings.Contains(u, ":1234"):
+		return "lmstudio"
+	default:
+		return "local"
+	}
+}
+
+// setupLocalModels guides adding local, no-key models. It tries to auto-detect
+// installed models from the server's /models endpoint and falls back to a
+// manual model-id entry.
+func setupLocalModels(db *database.DB, p *promptIO) error {
+	fmt.Fprintln(p.out)
+	fmt.Fprintf(p.out, "%s %s\n", cyan(glyphDot), bold("local models"))
+	note(p.out, "free, no API key — runs on your machine (Ollama :11434, LM Studio :1234)")
+
+	base, err := askLine(p, "local server URL", "http://127.0.0.1:11434/v1/chat/completions")
+	if err != nil {
+		return err
+	}
+	provider := localProviderName(base)
+
+	var chosen []string
+	if ids, derr := localModelLister(base); derr == nil && len(ids) > 0 {
+		success(p.out, "detected %d model(s) at %s", len(ids), provider)
+		for i, id := range ids {
+			fmt.Fprintf(p.out, "  %s %s\n", gray(fmt.Sprintf("%2d.", i+1)), id)
+		}
+		sel, err := askLine(p, "add which? "+dim("[a]ll / numbers e.g. 1,2 / Enter=none"), "")
+		if err != nil {
+			return err
+		}
+		mode, set := parseSelection(sel, len(ids))
+		for i, id := range ids {
+			if mode == selAll || (mode == selSubset && set[i+1]) {
+				chosen = append(chosen, id)
+			}
+		}
+	} else {
+		warn(p.out, "couldn't detect models at %s", base)
+		id, err := askLine(p, "model id (e.g. gemma3:27b), or Enter to skip", "")
+		if err != nil {
+			return err
+		}
+		if id != "" {
+			chosen = append(chosen, id)
+		}
+	}
+
+	if len(chosen) == 0 {
+		note(p.out, "no local models added")
+		return nil
+	}
+
+	if err := db.UpsertProvider(database.Provider{Name: provider, BaseURL: base, NeedsKey: false}); err != nil {
+		return err
+	}
+	for _, id := range chosen {
+		if err := db.AddModel(database.Model{
+			Provider: provider, Identifier: id, IntentTags: "chat,code", CostMultiplier: 0.05,
+		}); err != nil {
+			warn(p.out, "skip %s: %v", id, err)
+			continue
+		}
+		success(p.out, "added %s %s", provider, id)
+	}
+	return nil
 }
 
 // addCustomProviders lets the user register their own OpenAI-compatible

@@ -52,9 +52,9 @@ func TestRunWizardSelectNone(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	// select none, then decline adding a custom provider.
+	// mode 1 (API keys), select none, then decline adding a custom provider.
 	pio := &promptIO{
-		in:     bufio.NewReader(strings.NewReader("n\nn\n")),
+		in:     bufio.NewReader(strings.NewReader("1\nn\nn\n")),
 		out:    io.Discard,
 		secret: func() (string, error) { return "", nil },
 	}
@@ -79,7 +79,7 @@ func TestRunWizardSelectAllPromptsEachProviderKey(t *testing.T) {
 
 	var secretCalls int
 	pio := &promptIO{
-		in:     bufio.NewReader(strings.NewReader("a\nn\n")), // all, then no custom
+		in:     bufio.NewReader(strings.NewReader("1\na\nn\n")), // API mode, all, then no custom
 		out:    io.Discard,
 		secret: func() (string, error) { secretCalls++; return "", nil },
 	}
@@ -100,6 +100,54 @@ func TestRunWizardSelectAllPromptsEachProviderKey(t *testing.T) {
 }
 
 func keysEmpty() *config.Keys { return &config.Keys{Providers: map[string]string{}} }
+
+func TestSetupLocalModelsDetect(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "records.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Stub auto-detection to return two local models.
+	orig := localModelLister
+	localModelLister = func(string) ([]string, error) { return []string{"gemma3:27b", "llama3.1"}, nil }
+	t.Cleanup(func() { localModelLister = orig })
+
+	// Default URL (Enter), add model #1 only.
+	pio := &promptIO{
+		in:     bufio.NewReader(strings.NewReader("\n1\n")),
+		out:    io.Discard,
+		secret: func() (string, error) { return "", nil },
+	}
+	if err := setupLocalModels(db, pio); err != nil {
+		t.Fatalf("setupLocalModels: %v", err)
+	}
+
+	prov, err := db.Provider("ollama")
+	if err != nil {
+		t.Fatalf("ollama provider not created: %v", err)
+	}
+	if prov.NeedsKey {
+		t.Error("ollama provider should be no-key")
+	}
+
+	all, _ := db.AllModels()
+	var hasGemma, hasLlama bool
+	for _, m := range all {
+		switch m.Identifier {
+		case "gemma3:27b":
+			hasGemma = m.Enabled
+		case "llama3.1":
+			hasLlama = true
+		}
+	}
+	if !hasGemma {
+		t.Error("gemma3:27b should be added and enabled")
+	}
+	if hasLlama {
+		t.Error("llama3.1 should not have been added (not selected)")
+	}
+}
 
 func TestAddCustomProviderInteractive(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

@@ -11,7 +11,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`mistral-large-latest`, `mistral-small-latest`), **xAI** (`grok-3`), and
   **Qwen** (`qwen-max`, `qwen-plus`) alongside OpenAI/Gemini/Anthropic/DeepSeek
   (12 flagship models across 7 providers).
-- **Multi-select `init`** — the wizard now shows the full numbered catalog and
+- **Access-mode prompt in `init`** — asks whether you use **API keys**, **local
+  models**, or **both**, so subscription-only users (Claude Pro / ChatGPT Plus,
+  which don't include API access) are guided to local models instead.
+- **Guided local-model setup** — auto-detects installed models from a local
+  server's `/models` endpoint (Ollama, LM Studio) and adds the ones you pick as
+  no-key providers; falls back to manual model-id entry.
+- **Multi-select `init`** — the API path shows the full numbered catalog and
   takes one selection (`all` / `none` / `1,3,5` / Enter to keep) instead of a
   prompt per model, then asks for the key of each enabled provider.
 - **Bare `llmroute`** prints the model catalog with status, or — on first run —
