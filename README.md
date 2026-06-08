@@ -96,6 +96,28 @@ go install github.com/ssthil/llmroute@latest   # latest tagged release
 make build      # produces ./bin/llmroute
 ```
 
+### Upgrading (e.g. 0.2.0 → 0.3.0)
+
+Replace the binary in place — your config and data are preserved:
+
+```sh
+cd $(mktemp -d)
+VERSION=0.3.0
+OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
+curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/${FILE}"
+curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/checksums.txt"
+shasum -a 256 -c checksums.txt --ignore-missing
+tar -xzf "$FILE" llmroute && xattr -d com.apple.quarantine llmroute 2>/dev/null
+install -m 0755 llmroute "$(command -v llmroute)"   # sudo only if it's in /usr/local/bin
+llmroute --version
+```
+
+The database **auto-migrates** on first run — opening an existing `records.db`
+adds any new tables/columns (e.g. the `providers` table in 0.3.0) and seeds
+them, leaving your enabled models, usage logs, and `keys.json` untouched. See
+[CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+
 Cross-platform release archives are produced with
 [GoReleaser](https://goreleaser.com): `make snapshot`.
 
