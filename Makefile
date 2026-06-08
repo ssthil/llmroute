@@ -46,6 +46,12 @@ fmt: ## Format all Go source
 tidy: ## Tidy module dependencies
 	$(GO) mod tidy
 
+.PHONY: demo
+demo: install ## Render the terminal demo GIF (needs vhs: brew install vhs)
+	@command -v vhs >/dev/null 2>&1 || { echo "vhs not installed — run: brew install vhs"; exit 1; }
+	vhs demo.tape
+	@echo "wrote docs/demo.gif"
+
 .PHONY: snapshot
 snapshot: ## Build a local cross-platform snapshot via goreleaser
 	goreleaser release --snapshot --clean

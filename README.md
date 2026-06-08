@@ -21,6 +21,12 @@ Anthropic's native Messages API is not OpenAI-shaped at `/v1/chat/completions`,
 so routing to it assumes an OpenAI-compatible gateway in front; a native
 Anthropic adapter is not yet implemented.
 
+## Demo
+
+![llmroute terminal demo](docs/demo.gif)
+
+<sub>Generated with [VHS](https://github.com/charmbracelet/vhs) from [`demo.tape`](demo.tape) — regenerate with `make demo`.</sub>
+
 ---
 
 ## Features
