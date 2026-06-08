@@ -144,9 +144,11 @@ curl http://127.0.0.1:4040/v1/chat/completions \
 llmroute stats
 ```
 
-The interactive `init` shows the full numbered catalog, takes a single
-selection, then prompts (with hidden input) for the key of each enabled
-provider:
+The interactive `init` first asks how you access models — **API keys**, **local
+models** (Ollama / LM Studio, free & no key), or **both** — so chat-subscription
+users (Claude Pro, ChatGPT Plus, which don't include API access) are guided to
+local models. On the API path it shows the full numbered catalog, takes a single
+selection, then prompts (hidden) for each enabled provider's key:
 
 ```text
    1. ✓ deepseek-chat            deepseek   cost 0.14 · chat,code
