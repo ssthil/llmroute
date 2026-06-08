@@ -3,7 +3,9 @@
 package network
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -124,6 +126,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if leak := security.ScanForKeys(string(body)); leak != nil {
 		s.logger.Printf("blocked request: %v", leak)
 		writeError(w, http.StatusBadRequest, leak.Error())
+		return
+	}
+
+	// Validate the payload up front: it must be a JSON object. Otherwise the
+	// model field can't be rewritten and a meaningless body would be forwarded
+	// to the upstream, yielding a confusing provider-side error.
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		writeError(w, http.StatusBadRequest, "request body is empty")
+		return
+	}
+	if trimmed[0] != '{' || !json.Valid(trimmed) {
+		writeError(w, http.StatusBadRequest, "request body must be a valid JSON object")
 		return
 	}
 

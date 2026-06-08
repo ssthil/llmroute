@@ -78,6 +78,46 @@ func TestHandleChatCompletionsEndToEnd(t *testing.T) {
 	}
 }
 
+// TestHandleChatCompletionsRejectsInvalidJSON confirms a malformed or
+// non-object body is rejected with 400 before any upstream dispatch.
+func TestHandleChatCompletionsRejectsInvalidJSON(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "records.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("upstream must not be called for an invalid body")
+		return nil, nil
+	})}
+	srv := NewServer(db, router.New(db, client), nil)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"literal newline in string", "{\"messages\":[{\"content\":\"line1\nline2\"}]}"},
+		{"not json", "not json at all"},
+		{"json array not object", `[{"role":"user"}]`},
+		{"empty", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatalf("POST: %v", err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", resp.StatusCode)
+			}
+		})
+	}
+}
+
 // TestHandleChatCompletionsBlocksLeak confirms the credential gate fires before
 // any upstream dispatch.
 func TestHandleChatCompletionsBlocksLeak(t *testing.T) {

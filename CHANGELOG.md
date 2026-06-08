@@ -4,6 +4,16 @@ All notable changes to llmroute are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-06-08
+
+### Fixed
+- The proxy now validates the request body up front and returns a clear
+  `400 request body must be a valid JSON object` for malformed/non-object
+  payloads (e.g. a literal newline inside a JSON string from a multi-line
+  `curl`). Previously such bodies were forwarded verbatim — shipping the
+  unrewritten `"model":"auto"` to the provider and yielding a confusing
+  upstream error.
+
 ## [0.4.1] - 2026-06-08
 
 ### Added
@@ -93,6 +103,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   state, pure-Go SQLite usage accounting, and the `init`/`proxy`/`stats`
   commands.
 
+[0.4.2]: https://github.com/ssthil/llmroute/releases/tag/v0.4.2
 [0.4.1]: https://github.com/ssthil/llmroute/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ssthil/llmroute/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ssthil/llmroute/releases/tag/v0.3.0
