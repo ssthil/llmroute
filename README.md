@@ -25,8 +25,6 @@ Anthropic adapter is not yet implemented.
 
 ![llmroute terminal demo](docs/demo.gif)
 
-<sub>Generated with [VHS](https://github.com/charmbracelet/vhs) from [`demo.tape`](demo.tape) — regenerate with `make demo`.</sub>
-
 ---
 
 ## Features
