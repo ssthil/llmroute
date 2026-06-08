@@ -56,7 +56,7 @@ named `llmroute_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows).
 **Linux / macOS:**
 
 ```sh
-VERSION=0.4.1   # latest release — see the releases page
+VERSION=0.4.2   # latest release — see the releases page
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux | darwin
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # amd64 | arm64
 FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
@@ -100,13 +100,13 @@ go install github.com/ssthil/llmroute@latest   # latest tagged release
 make build      # produces ./bin/llmroute
 ```
 
-### Upgrading (e.g. 0.4.0 → 0.4.1)
+### Upgrading (e.g. 0.4.1 → 0.4.2)
 
 Replace the binary in place — your config and data are preserved:
 
 ```sh
 cd $(mktemp -d)
-VERSION=0.4.1
+VERSION=0.4.2
 OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
 curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/${FILE}"
