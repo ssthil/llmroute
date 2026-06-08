@@ -283,8 +283,15 @@ func (db *DB) AddModel(m Model) error {
 	if cost <= 0 {
 		cost = 1.0
 	}
+	// Idempotent: re-adding an existing model updates it and (re)enables it,
+	// rather than failing on the unique identifier.
 	_, err := db.Exec(`INSERT INTO models (provider, identifier, cost_multiplier, intent_tags, enabled)
-		VALUES (?, ?, ?, ?, ?)`, m.Provider, m.Identifier, cost, tags, boolToInt(true))
+		VALUES (?, ?, ?, ?, 1)
+		ON CONFLICT(identifier) DO UPDATE SET
+			provider        = excluded.provider,
+			cost_multiplier = excluded.cost_multiplier,
+			intent_tags     = excluded.intent_tags,
+			enabled         = 1`, m.Provider, m.Identifier, cost, tags)
 	if err != nil {
 		return fmt.Errorf("add model %q: %w", m.Identifier, err)
 	}

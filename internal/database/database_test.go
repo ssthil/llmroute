@@ -186,6 +186,31 @@ func TestAddRemoveModel(t *testing.T) {
 		t.Error("gemma3:27b not routable for code after add")
 	}
 
+	// Re-adding an existing (disabled) model should re-enable and update it,
+	// not fail on the unique identifier.
+	if err := db.SetModelEnabled("gemma3:27b", false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if err := db.AddModel(Model{Provider: "ollama", Identifier: "gemma3:27b", IntentTags: "chat", CostMultiplier: 0.05}); err != nil {
+		t.Fatalf("re-AddModel should be idempotent: %v", err)
+	}
+	again, _ := db.AllModels()
+	var readded bool
+	for _, m := range again {
+		if m.Identifier == "gemma3:27b" {
+			readded = true
+			if !m.Enabled {
+				t.Error("re-added model should be enabled")
+			}
+			if m.IntentTags != "chat" || m.CostMultiplier != 0.05 {
+				t.Errorf("re-added model not updated: %+v", m)
+			}
+		}
+	}
+	if !readded {
+		t.Fatal("gemma3:27b missing after re-add")
+	}
+
 	if err := db.RemoveModel("gemma3:27b"); err != nil {
 		t.Fatalf("RemoveModel: %v", err)
 	}

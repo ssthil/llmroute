@@ -4,6 +4,16 @@ All notable changes to llmroute are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-08
+
+### Fixed
+- `models add` (and the `init` local-model / custom-provider steps) is now
+  idempotent: re-adding an existing model updates and **re-enables** it instead
+  of failing silently on the unique id. Previously, choosing local mode in
+  `init` could leave an already-known local model (e.g. `gemma3:27b`) disabled,
+  so the proxy reported "0 models enabled". Recover an affected model with
+  `llmroute models enable <id>`.
+
 ## [0.4.0] - 2026-06-08
 
 ### Added
@@ -79,6 +89,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   state, pure-Go SQLite usage accounting, and the `init`/`proxy`/`stats`
   commands.
 
+[0.4.1]: https://github.com/ssthil/llmroute/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ssthil/llmroute/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ssthil/llmroute/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ssthil/llmroute/releases/tag/v0.2.0
