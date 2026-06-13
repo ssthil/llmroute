@@ -47,83 +47,37 @@ Anthropic adapter is not yet implemented.
 
 ## Install
 
-### Download a release binary
+### Homebrew (macOS / Linux)
 
-Pre-built, CGO-free binaries are attached to every
-[GitHub release](https://github.com/ssthil/llmroute/releases). Archives are
-named `llmroute_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows).
-
-**Linux / macOS:**
-
-```sh
-VERSION=0.4.2   # latest release — see the releases page
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux | darwin
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')   # amd64 | arm64
-FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
-
-# download the archive (keep its original name so checksums match)
-curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/${FILE}"
-
-# (optional) verify against the published checksums
-curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/checksums.txt"
-shasum -a 256 -c checksums.txt --ignore-missing             # prints "${FILE}: OK"
-
-tar -xzf "${FILE}" llmroute
-
-# install to a user dir on your PATH (no sudo)
-mkdir -p ~/.local/bin && install -m 0755 llmroute ~/.local/bin/llmroute
-llmroute --version
-# (add to PATH if needed: echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc)
+```bash
+brew tap ssthil/senthil-tools
+brew install llmroute
 ```
 
-> Prefer a system-wide install for all users? Use
-> `sudo install -m 0755 llmroute /usr/local/bin/llmroute` instead (it'll prompt
-> for your password).
-
-On macOS, a downloaded binary may be quarantined by Gatekeeper. If you see
-*"cannot be opened because the developer cannot be verified"*, clear the flag:
-`xattr -d com.apple.quarantine llmroute`.
-
-**Windows (PowerShell):** download `llmroute_<version>_windows_amd64.zip` from the
-[releases page](https://github.com/ssthil/llmroute/releases), extract it, and put
-`llmroute.exe` somewhere on your `PATH`.
-
-### Install with Go
-
-```sh
-go install github.com/ssthil/llmroute@latest   # latest tagged release
+Upgrade:
+```bash
+brew upgrade llmroute
 ```
+
+### Go
+
+```bash
+go install github.com/ssthil/llmroute@latest
+```
+
+### Binary releases
+
+Download from [Releases](https://github.com/ssthil/llmroute/releases), verify with `checksums.txt`.
+
+**Windows:** download `llmroute_<version>_windows_amd64.zip`, extract, add `llmroute.exe` to your `PATH`.
 
 ### Build from source
 
-```sh
-make build      # produces ./bin/llmroute
+```bash
+make build   # produces ./bin/llmroute
 ```
 
-### Upgrading (e.g. 0.4.1 → 0.4.2)
-
-Replace the binary in place — your config and data are preserved:
-
-```sh
-cd $(mktemp -d)
-VERSION=0.4.2
-OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-FILE="llmroute_${VERSION}_${OS}_${ARCH}.tar.gz"
-curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/${FILE}"
-curl -sSL -O "https://github.com/ssthil/llmroute/releases/download/v${VERSION}/checksums.txt"
-shasum -a 256 -c checksums.txt --ignore-missing
-tar -xzf "$FILE" llmroute && xattr -d com.apple.quarantine llmroute 2>/dev/null
-install -m 0755 llmroute "$(command -v llmroute)"   # sudo only if it's in /usr/local/bin
-llmroute --version
-```
-
-The database **auto-migrates** on first run — opening an existing `records.db`
-adds any new tables/columns (e.g. the `providers` table in 0.3.0) and seeds
-them, leaving your enabled models, usage logs, and `keys.json` untouched. See
-[CHANGELOG.md](CHANGELOG.md) for what changed in each release.
-
-Cross-platform release archives are produced with
-[GoReleaser](https://goreleaser.com): `make snapshot`.
+The database **auto-migrates** on first run — existing config, usage logs, and `keys.json` are preserved. See [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ---
 
