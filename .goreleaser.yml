@@ -59,6 +59,20 @@ changelog:
       - "^chore:"
       - "Merge pull request"
 
+brews:
+  - name: llmroute
+    repository:
+      owner: ssthil
+      name: homebrew-senthil-tools
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/ssthil/llmroute"
+    description: "A native, multi-LLM routing proxy CLI"
+    license: "MIT"
+    install: |
+      bin.install "llmroute"
+    test: |
+      system "#{bin}/llmroute", "--version"
+
 release:
   draft: false
   prerelease: auto
