@@ -129,6 +129,10 @@ func (r *Router) Dispatch(ctx context.Context, body []byte) (*Result, Intent, er
 	}
 
 	var lastErr error
+	// rateLimitErr retains the most recent retryable upstream error (429/5xx).
+	// Tracked separately so a later "no API key" skip does not bury it in the
+	// final error message — rate-limit context is more actionable to the caller.
+	var rateLimitErr error
 	for _, m := range candidates {
 		prov, ok := providers[m.Provider]
 		if !ok {
@@ -170,7 +174,9 @@ func (r *Router) Dispatch(ctx context.Context, body []byte) (*Result, Intent, er
 		}
 		if isRetryable(resp.StatusCode) {
 			_ = resp.Body.Close()
-			lastErr = fmt.Errorf("provider %q returned retryable status %d", prov.Name, resp.StatusCode)
+			e := fmt.Errorf("provider %q returned retryable status %d", prov.Name, resp.StatusCode)
+			lastErr = e
+			rateLimitErr = e
 			continue
 		}
 		return &Result{Model: m.Identifier, Provider: prov.Name, Response: resp}, intent, nil
@@ -178,6 +184,11 @@ func (r *Router) Dispatch(ctx context.Context, body []byte) (*Result, Intent, er
 
 	if lastErr == nil {
 		lastErr = ErrNoUpstream
+	}
+	// Prefer the retryable error over a "no API key" message: if a provider
+	// was actually reached and rate-limited, that is the meaningful failure.
+	if rateLimitErr != nil {
+		lastErr = rateLimitErr
 	}
 	return nil, intent, fmt.Errorf("%w: %v", ErrNoUpstream, lastErr)
 }

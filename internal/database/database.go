@@ -137,6 +137,15 @@ func (db *DB) Migrate() error {
 		!strings.Contains(err.Error(), "duplicate column") {
 		return fmt.Errorf("migrate models.enabled: %w", err)
 	}
+	// gemini-2.5-flash was seeded without the "code" intent tag; free-tier
+	// Google keys work with flash but not pro (pro returns 429 on free tier).
+	// Update existing rows that still carry the old tag set.
+	if _, err := db.Exec(`
+		UPDATE models SET intent_tags = 'vision,chat,code'
+		WHERE identifier = 'gemini-2.5-flash' AND intent_tags = 'vision,chat'
+	`); err != nil {
+		return fmt.Errorf("migrate gemini-2.5-flash intent_tags: %w", err)
+	}
 	return nil
 }
 
@@ -156,7 +165,7 @@ var seedProviders = []Provider{
 // are flagship picks per provider; they can drift over time — edit with
 // 'llmroute models add/rm' if a provider renames one.
 var seedModels = []Model{
-	{Provider: "gemini", Identifier: "gemini-2.5-flash", CostMultiplier: 0.30, IntentTags: "vision,chat"},
+	{Provider: "gemini", Identifier: "gemini-2.5-flash", CostMultiplier: 0.30, IntentTags: "vision,chat,code"},
 	{Provider: "gemini", Identifier: "gemini-2.5-pro", CostMultiplier: 1.00, IntentTags: "vision,chat,code"},
 	{Provider: "anthropic", Identifier: "claude-3-5-sonnet", CostMultiplier: 3.00, IntentTags: "code,chat"},
 	{Provider: "anthropic", Identifier: "claude-3-5-haiku", CostMultiplier: 0.80, IntentTags: "chat"},
